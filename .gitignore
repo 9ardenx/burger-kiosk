@@ -9,3 +9,7 @@ data/
 /*.pdf
 /*.docx
 ~$*
+# Isolated checkout used by the cloud publishing toolchain
+/sites/
+# Allow a previously launched local server to keep serving its old files.
+/kiosk/static/

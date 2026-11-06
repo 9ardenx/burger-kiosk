@@ -2,9 +2,17 @@
 
 소프트웨어공학 3조의 설계에 따라 만든 키오스크와 매장 관리 프로그램입니다. 고객은 판매 가능한 버거와 옵션을 선택해 결제하고, 관리자는 같은 데이터베이스에서 가격·품절 여부와 조리 상태를 관리합니다.
 
+## 공개 매장
+
+[고객 키오스크](https://9ardenx.github.io/burger-kiosk/) · [관리자 화면](https://9ardenx.github.io/burger-kiosk/admin.html)
+
+고객은 휴대폰에서 바로 메뉴를 담고 모의 결제를 할 수 있습니다. 관리자는 다른 기기에서 로그인해 **주문 현황 → 새로고침**을 누르면 같은 주문번호와 옵션을 확인할 수 있습니다. 주문 목록은 열어 두면 약 8초 간격으로 갱신됩니다. 공개 매장은 공용 서버의 D1 데이터베이스를 사용하므로 개발 PC가 꺼져 있어도 이용할 수 있습니다. 결제는 과제 시연용 모의 카드 승인과 거절을 지원합니다.
+
+공개 매장의 관리자 암호는 운영자에게 별도로 전달됩니다. 암호 원문은 저장소와 배포 파일에 포함하지 않습니다. 공개 매장의 주문 및 가격 설정은 아래의 로컬 SQLite 시연과 별도로 관리합니다.
+
 ## 로컬 실행
 
-Python 3.10 이상에서 동작합니다. 기본 모드는 Python 표준 라이브러리와 SQLite를 사용하므로 별도로 설치할 패키지가 없습니다.
+Python 3.10 이상에서 동작합니다. 로컬 모드는 Python 표준 라이브러리와 SQLite를 사용하므로 별도로 설치할 패키지가 없습니다.
 
 ```powershell
 git clone https://github.com/9ardenx/burger-kiosk.git
@@ -41,7 +49,8 @@ python app.py
 | 파일 | 담당 기능 |
 | --- | --- |
 | `app.py` | 서버 실행, DB 초기화, 관리자 암호 설정 |
-| `kiosk/static/` | 고객·관리자 화면, 메뉴 그림, 장바구니 세션 |
+| `docs/` | 고객·관리자 화면과 정적 자산. Pages에서는 공용 API, 로컬에서는 Python API에 연결 |
+| `cloud/api.mjs`, `cloud/schema.ts` | 공개 매장의 주문·결제·관리자 API와 DB 스키마 |
 | `kiosk/http.py` | 화면 및 API 라우팅, 관리자 세션 |
 | `kiosk/orders.py` | 금액 재검증, 주문 시점의 단가·옵션 보존, 주문 상태 전이 |
 | `kiosk/payments.py` | 결제 시도 이력, 모의 승인, 테스트 PG 연동과 결과 대조 |
@@ -63,9 +72,9 @@ python -m unittest discover -s tests -v
 
 ```powershell
 git status
-git add app.py kiosk tests README.md .gitignore
+git add app.py kiosk tests docs cloud README.md .gitignore
 git commit -m "Update kiosk"
 git push
 ```
 
-기본 데이터 폴더, 인증 설정 파일, 프로젝트 루트의 과제 원본과 강의 자료는 Git 제외 목록에 있습니다. 소스를 GitHub에 푸시한 뒤에도 키오스크를 이용할 PC에서는 Python 서버를 실행해야 합니다.
+기본 데이터 폴더, 인증 설정 파일, 프로젝트 루트의 과제 원본과 강의 자료는 Git 제외 목록에 있습니다. 로컬 시연은 Python 서버를 실행해 사용합니다. 공개 매장의 화면은 `docs/`에서 배포하며, 화면 변경을 main에 푸시한 뒤 `git subtree push --prefix=docs origin gh-pages`를 실행하면 공개 화면에 반영됩니다. 공용 서버 코드는 별도로 배포합니다.

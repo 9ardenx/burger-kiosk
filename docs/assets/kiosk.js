@@ -11,7 +11,7 @@ const save = () => sessionStorage.setItem(storageKey, JSON.stringify(state));
 const count = () => state.cart.reduce((sum, line) => sum + line.quantity, 0);
 const total = () => state.cart.reduce((sum, line) => sum + line.unit * line.quantity, 0);
 const currentMenu = id => menu.find(item => item.id === id);
-const picture = item => `/assets/${item.kind === "chicken" ? "chicken" : "classic"}.svg`;
+const picture = item => `./assets/${item.kind === "chicken" ? "chicken" : "classic"}.svg`;
 const quantityControl = (line, i) => `<div class="quantity">
   <button data-action="minus" data-i="${i}" aria-label="${escapeText(line.name)} 수량 감소" ${line.quantity<=1?"disabled":""}>−</button>
   <b>${line.quantity}</b><button data-action="plus" data-i="${i}" aria-label="${escapeText(line.name)} 수량 증가" ${line.quantity>=99?"disabled":""}>+</button></div>`;
@@ -86,7 +86,7 @@ function checkoutView() {
   const lines = order ? itemsHtml(order.items) : cartLines();
   const amount = order ? order.total : total();
   return `<div class="narrow"><div class="heading"><h1>주문 확인 및 결제</h1><p>메뉴와 최종 금액을 확인해 주세요.</p></div>
-    <section class="panel">${lines}<div class="line-heading pay-method"><span>결제 방식</span><b>${mode==="demo"?"로컬 모의 결제":"토스페이먼츠 테스트"}</b></div>
+    <section class="panel">${lines}<div class="line-heading pay-method"><span>결제 방식</span><b>${mode==="demo"?"모의 카드 결제":"토스페이먼츠 테스트"}</b></div>
     ${demoSelect()}<div class="total"><span>최종 결제 금액</span><strong>${money(amount)}</strong></div>
     <div class="actions">${button("cart","이전",false)}${button("pay",money(amount)+" 결제하기")}</div></section></div>`;
 }

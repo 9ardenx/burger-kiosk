@@ -13,7 +13,7 @@ function login() {
 }
 function menuView() {
   return `<div class="heading"><h1>메뉴 관리</h1><p>판매 가격과 품절 여부를 변경할 수 있습니다.</p></div><div class="admin-menus">
-    ${menu.map(item=>`<form class="panel menu-edit" data-menu="${item.id}"><div class="edit-heading"><img alt="" src="/assets/${item.kind==="chicken"?"chicken":"classic"}.svg"><h2>${escapeText(item.name)}</h2></div>
+    ${menu.map(item=>`<form class="panel menu-edit" data-menu="${item.id}"><div class="edit-heading"><img alt="" src="./assets/${item.kind==="chicken"?"chicken":"classic"}.svg"><h2>${escapeText(item.name)}</h2></div>
     <label>판매 가격 (원)<input required type="number" name="price" min="0" max="1000000" step="1" value="${item.base_price}"></label>
     <label>판매 상태<select name="sold"><option value="no" ${item.is_sold_out?"":"selected"}>판매 중</option><option value="yes" ${item.is_sold_out?"selected":""}>품절</option></select></label>
     <button class="primary wide">변경 저장</button></form>`).join("")}</div>`;

@@ -15,7 +15,8 @@ from urllib.parse import urlsplit
 from . import orders, payments
 from .store import Problem, connection, edit_menu, menu_list
 
-ASSETS = Path(__file__).resolve().parent / "static"
+PAGES = Path(__file__).resolve().parents[1] / "docs"
+ASSETS = PAGES / "assets"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -127,14 +128,19 @@ class Handler(BaseHTTPRequestHandler):
             if not route.startswith("/api/"):
                 if self.command != "GET":
                     raise Problem("허용하지 않는 요청입니다.", 405)
-                pages = {"/":"index.html", "/admin":"admin.html", "/return":"index.html"}
+                pages = {"/":"index.html", "/index.html":"index.html", "/admin":"admin.html", "/admin.html":"admin.html", "/return":"index.html"}
                 name = pages.get(route)
                 if not name and re.fullmatch(r"/assets/[a-z0-9_-]+\.(js|css|svg)", route):
                     name = route.rsplit("/",1)[-1]
-                if not name or not (ASSETS/name).is_file():
+                if not name:
+                    raise Problem("페이지를 찾을 수 없습니다.", 404)
+                file = (PAGES if name.endswith(".html") else ASSETS) / name
+                if route == "/assets/backend.js":
+                    file = Path(__file__).with_name("local-api.js")
+                if not file.is_file():
                     raise Problem("페이지를 찾을 수 없습니다.", 404)
                 kind = mimetypes.guess_type(name)[0] or "application/octet-stream"
-                return self.send_data(200, (ASSETS/name).read_bytes(), kind + "; charset=utf-8")
+                return self.send_data(200, file.read_bytes(), kind + "; charset=utf-8")
             cookies = SimpleCookie(self.headers.get("Cookie", ""))
             self.customer = cookies["kiosk_session"].value if "kiosk_session" in cookies else ""
             if not re.fullmatch(r"[A-Za-z0-9_-]{43}", self.customer):
