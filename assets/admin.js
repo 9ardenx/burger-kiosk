@@ -1,10 +1,16 @@
+import {editorHtml,editorData,optionRow} from "./menu-editor.js";
+import {categoryName,menuPicture} from "./catalog.js";
 import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
 
 const tabs=document.querySelector("#tabs");
 const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료"};
 const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 완료"};
 let current="orders", orders=[], menu=[], busy=false, selected=null, filter="open", timer;
+let editor=null, previewUrl=null;
+function resetPreview(){if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=null;}
+function closeEditor(){resetPreview();editor=null;}
 function login() {
+  closeEditor();
   clearInterval(timer);
   tabs.hidden=true;
   app.innerHTML=`<div class="login panel"><h1>관리자 로그인</h1><p class="muted">매장 메뉴와 주문을 관리합니다.</p>
@@ -12,11 +18,13 @@ function login() {
     <button class="primary wide">로그인</button></form></div>`;
 }
 function menuView() {
-  return `<div class="heading"><h1>메뉴 관리</h1><p>판매 가격과 품절 여부를 변경할 수 있습니다.</p></div><div class="admin-menus">
-    ${menu.map(item=>`<form class="panel menu-edit" data-menu="${item.id}"><div class="edit-heading"><img alt="" src="./assets/${item.kind==="chicken"?"chicken":"classic"}.svg"><h2>${escapeText(item.name)}</h2></div>
-    <label>판매 가격 (원)<input required type="number" name="price" min="0" max="1000000" step="1" value="${item.base_price}"></label>
-    <label>판매 상태<select name="sold"><option value="no" ${item.is_sold_out?"":"selected"}>판매 중</option><option value="yes" ${item.is_sold_out?"selected":""}>품절</option></select></label>
-    <button class="primary wide">변경 저장</button></form>`).join("")}</div>`;
+if(editor)return editorHtml(editor.item);
+  return `<div class="heading split"><div><h1>메뉴 관리</h1><p>메뉴와 옵션, 사진, 판매 상태를 관리합니다.</p></div>
+    <button class="primary" data-new-menu>+ 메뉴 등록</button></div><div class="admin-menus">
+    ${menu.map(item=>`<article class="panel catalog-card"><img src="${menuPicture(item)}" alt="">
+      <div><small>${categoryName(item.category)} · ${item.is_sold_out?"품절":"판매 중"}</small><h2>${escapeText(item.name)}</h2>
+      <strong>${money(item.base_price)}</strong></div><button class="secondary" data-edit-menu="${item.id}" aria-label="${escapeText(item.name)} 수정">수정</button></article>`).join("")}</div>`;
+
 }
 function ordersView() {
   const rows=orders.filter(o=>filter==="all" || (filter==="done"?o.status==="COMPLETED":o.status!=="COMPLETED"));
@@ -43,6 +51,7 @@ async function refresh() {
 }
 function setRequestState(pending) {
   app.setAttribute("aria-busy", String(pending));
+  const form=document.querySelector("#menu-editor");if(form)form.inert=pending;
   for (const button of document.querySelectorAll("#tabs button, [data-act], [data-next], form button")) {
     button.disabled = pending;
   }
@@ -53,7 +62,7 @@ async function act(task, silent=false) {
   try{await task();}
   catch(error){
     if(error.status===401)login();
-    else if(error.status===409)await refresh();
+    else if(error.status===409){closeEditor();await refresh();}
     if(!silent || error.status!==401)notice(error.message);
   } finally{busy=false;setRequestState(false);}
 }
@@ -70,21 +79,54 @@ document.addEventListener("submit",event=>{
       await api("/api/admin/login",{password:data.get("password")});
       await refresh();poll();return;
     }
-    const item=menu.find(m=>m.id===Number(form.dataset.menu));
-    await api("/api/admin/menu/"+item.id,{base_price:Number(data.get("price")),is_sold_out:data.get("sold")==="yes",version:item.version});
-    await refresh();notice(item.name+" 변경을 저장했습니다.");
+    if(form.id!=="menu-editor" || !editor)return;
+    const payload=await editorData(form,editor);
+    const create=!editor.item;
+    await api(create?"/api/admin/menu":"/api/admin/menu/"+editor.item.id,payload);
+    closeEditor();await refresh();
+    notice(payload.name+(create?" 메뉴를 등록했습니다.":" 변경을 저장했습니다."));
   });
 });
 document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(!b || b.type==="submit" && b.closest("form"))return;
+if(busy)return;
+  if(b.hasAttribute("data-new-menu") || b.dataset.editMenu) {
+    resetPreview();editor={item:menu.find(item=>item.id===Number(b.dataset.editMenu))||null,key:crypto.randomUUID()};
+    notice();render();app.querySelector('[name="name"]').focus();return;
+  }
+  if(b.hasAttribute("data-back-menu")) {closeEditor();render();return;}
+  if(b.hasAttribute("data-add-option")){
+    const rows=document.querySelector("#option-rows");
+    if(rows.children.length>=20){notice("옵션은 20개까지 등록할 수 있습니다.");return;}
+    rows.insertAdjacentHTML("beforeend",optionRow());rows.lastElementChild.querySelector("input").focus();return;
+  }
+  if(b.hasAttribute("data-remove-option")){b.closest(".option-edit").remove();return;}
+  if(b.hasAttribute("data-clear-photo")){
+    const form=b.closest("form");resetPreview();form.elements.photo.value="";form.dataset.clearPhoto="1";
+    form.querySelector("#photo-preview").src=menuPicture({...editor.item,category:form.elements.category.value,photo_key:null});return;
+  }
   if(b.dataset.filter){filter=b.dataset.filter;render();return;}
   if(b.dataset.detail){selected=selected===b.dataset.detail?null:b.dataset.detail;render();return;}
   act(async()=>{
-    if(b.dataset.tab){current=b.dataset.tab;await refresh();}
+    if(b.dataset.tab){closeEditor();current=b.dataset.tab;await refresh();}
     else if(b.dataset.next){await api("/api/admin/orders/"+b.dataset.next,{expected:b.dataset.status});await refresh();}
     else if(b.dataset.act==="refresh")await refresh();
     else if(b.dataset.act==="logout"){await api("/api/admin/logout",{});login();}
   });
 });
 act(async()=>{await refresh();poll();},true);
+
+document.addEventListener("change",event=>{
+  const form=event.target.closest("#menu-editor");if(!form||!editor)return;
+  const image=form.querySelector("#photo-preview");
+  if(event.target.name==="photo"){
+    const file=form.elements.photo.files[0];if(!file)return;
+    if(!["image/jpeg","image/png","image/webp"].includes(file.type)||file.size>10*1024*1024){
+      form.elements.photo.value="";notice("10 MB 이하의 JPG, PNG, WebP 파일을 선택해 주세요.");return;
+    }
+    resetPreview();previewUrl=URL.createObjectURL(file);image.src=previewUrl;delete form.dataset.clearPhoto;notice();
+  } else if(event.target.name==="category" && !previewUrl && (!editor.item?.photo_key||form.dataset.clearPhoto)){
+    image.src=menuPicture({...editor.item,category:form.elements.category.value,photo_key:null});
+  }
+});

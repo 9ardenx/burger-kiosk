@@ -1,3 +1,4 @@
+import {labels, menuPicture} from "./catalog.js";
 import {api, app, money, escapeText, itemsHtml, notice} from "./common.js";
 
 const storageKey = "burger-kiosk-session-v1";
@@ -11,7 +12,7 @@ const save = () => sessionStorage.setItem(storageKey, JSON.stringify(state));
 const count = () => state.cart.reduce((sum, line) => sum + line.quantity, 0);
 const total = () => state.cart.reduce((sum, line) => sum + line.unit * line.quantity, 0);
 const currentMenu = id => menu.find(item => item.id === id);
-const picture = item => `./assets/${item.kind === "chicken" ? "chicken" : "classic"}.svg`;
+let categoryFilter="all";
 const quantityControl = (line, i) => `<div class="quantity">
   <button data-action="minus" data-i="${i}" aria-label="${escapeText(line.name)} 수량 감소" ${line.quantity<=1?"disabled":""}>−</button>
   <b>${line.quantity}</b><button data-action="plus" data-i="${i}" aria-label="${escapeText(line.name)} 수량 증가" ${line.quantity>=99?"disabled":""}>+</button></div>`;
@@ -37,6 +38,10 @@ function syncPrices() {
     const item = currentMenu(line.id);
     if (!item) continue;
     const options = item.options.filter(o => line.options.includes(o.id));
+    line.options = options.map(o=>o.id);
+    line.label = options.map(o=>o.name).join(", ");
+    line.version = item.version;
+    line.name = item.name;
     line.unit = item.base_price + options.reduce((sum,o) => sum+o.extra_price,0);
   }
 }
@@ -53,17 +58,20 @@ function cartSummary(edit = false) {
     ${button(edit?"review":"cart", edit?"주문 확인":"장바구니 보기",true,!count()||(edit && state.cart.some(line=>!currentMenu(line.id))))}</div>`;
 }
 function menuView() {
-  const cards = menu.map(item => `<button class="menu-card ${item.kind==="chicken"?"sage":"oat"}" data-action="choose" data-id="${item.id}">
-    <span class="art"><img src="${picture(item)}" alt=""></span><span class="card-copy"><strong>${escapeText(item.name)}</strong>
+  const visible=menu.filter(item=>categoryFilter==="all" || (item.category??"burger")===categoryFilter);
+  const cards = visible.map(item => `<button class="menu-card ${item.kind==="chicken"?"sage":"oat"}" data-action="choose" data-id="${item.id}">
+    <span class="art ${item.photo_key?"with-photo":""}"><img src="${menuPicture(item)}" alt=""></span><span class="card-copy"><strong>${escapeText(item.name)}</strong>
     <small>${escapeText(item.description)}</small><span class="card-bottom"><b>${money(item.base_price)}</b><span class="add-mark" aria-hidden="true">＋</span></span></span></button>`).join("");
-  return `<div class="heading"><h1>메뉴 선택</h1><p>주문할 버거를 골라 주세요.</p></div><div class="shop-layout"><section class="menu-grid" aria-label="판매 중인 메뉴">
-    ${cards||'<p class="panel">현재 주문 가능한 메뉴가 없습니다.</p>'}</section><aside>${cartSummary()}</aside></div>`;
+  return `<div class="heading"><h1>메뉴 선택</h1><p>주문할 메뉴를 골라 주세요.</p></div>
+    <nav class="filters menu-filters" aria-label="메뉴 분류">${Object.entries({all:"전체",...labels}).map(([id,title])=>
+      `<button data-category="${id}" aria-pressed="${id===categoryFilter}">${title}</button>`).join("")}</nav><div class="shop-layout"><section class="menu-grid" aria-label="판매 중인 메뉴">
+    ${cards||'<p class="panel">이 분류에는 판매 중인 메뉴가 없습니다.</p>'}</section><aside>${cartSummary()}</aside></div>`;
 }
 function optionView(id) {
   const item = currentMenu(id);
   if (!item) return;
   dialog.innerHTML = `<form id="option-form"><button type="button" class="close" data-action="close" aria-label="닫기">×</button>
-    <div class="dialog-art ${item.kind==="chicken"?"sage":"oat"}"><img src="${picture(item)}" alt=""></div><div class="dialog-body">
+    <div class="dialog-art ${item.photo_key?"with-photo":""} ${item.kind==="chicken"?"sage":"oat"}"><img src="${menuPicture(item)}" alt=""></div><div class="dialog-body">
     <h2 id="option-title">${escapeText(item.name)}</h2><p class="muted">${escapeText(item.description)}</p>
     <div class="line-heading"><span>기본 가격</span><b>${money(item.base_price)}</b></div>
     ${item.options.length?`<fieldset><legend>추가 옵션</legend>${item.options.map(o=>`<label class="option"><span><input type="checkbox" value="${o.id}"> ${escapeText(o.name)}</span><b>+${money(o.extra_price)}</b></label>`).join("")}</fieldset>`:""}
@@ -76,8 +84,8 @@ function optionView(id) {
     const options = selected().map(o=>o.id);
     const existing = state.cart.find(l=>l.id===id && l.options.join()===options.join());
     if (existing && existing.quantity>=99) {dialog.close();notice("한 항목은 최대 99개까지 담을 수 있습니다.");return;}
-    if (existing) existing.quantity++;
-    else state.cart.push({id,name:item.name,options,label:selected().map(o=>o.name).join(", "),quantity:1,unit:price()});
+    if (existing) {existing.quantity++;existing.version=item.version;existing.unit=price();existing.name=item.name;existing.label=selected().map(o=>o.name).join(", ");}
+    else state.cart.push({id,name:item.name,options,label:selected().map(o=>o.name).join(", "),quantity:1,unit:price(),version:item.version});
     invalidateOrder(); dialog.close(); go("cart");
   };
   dialog.showModal();
@@ -127,7 +135,7 @@ async function pay() {
   if (!state.checkoutKey) {state.checkoutKey=crypto.randomUUID();save();}
   if (!order) {
     order=await api("/api/orders",{key:state.checkoutKey,items:state.cart.map(l=>({
-      menu_id:l.id,options:l.options,quantity:l.quantity,expected_unit:l.unit
+      menu_id:l.id,options:l.options,quantity:l.quantity,expected_unit:l.unit,expected_version:l.version
     }))});
     state.orderId=order.id;save();
   }
@@ -181,13 +189,15 @@ async function run(task) {
   finally {busy=false;app.inert=false;app.removeAttribute("aria-busy");}
 }
 document.addEventListener("click",event=>{
+  const filterButton=event.target.closest("[data-category]");
+  if(filterButton && !busy){categoryFilter=filterButton.dataset.category;render();return;}
   const control=event.target.closest("[data-action]");
   if(!control || control.disabled)return;
   const action=control.dataset.action;
   if(action==="close") {dialog.close();return;}
   run(async()=>{
     if(action==="choose") return optionView(Number(control.dataset.id));
-    if(action==="reset"){state=defaults();order=null;await loadMenu();go("menu");return;}
+    if(action==="reset"){categoryFilter="all";state=defaults();order=null;await loadMenu();go("menu");return;}
     if(action==="edit"){invalidateOrder();await loadMenu();syncPrices();go("cart");return;}
     if(action==="retry"){state.attemptKey=null;save();return pay();}
     if(action==="pay") return pay();
@@ -223,3 +233,18 @@ async function boot() {
 }
 app.innerHTML='<button class="secondary" data-action="reload">메뉴 다시 불러오기</button>';
 run(boot);
+
+let checkingShelf=false;
+async function refreshShelf() {
+  if(checkingShelf || document.hidden || busy || dialog.open || state.page!=="menu")return;
+  checkingShelf=true;
+  try{
+    const catalog=await api("/api/menu");
+    if(!busy && !dialog.open && state.page==="menu" && JSON.stringify(menu)!==JSON.stringify(catalog.menu)){
+      menu=catalog.menu;render();
+    }
+  } catch { /* The current shelf stays usable while the next refresh is pending. */ }
+  finally {checkingShelf=false;}
+}
+document.addEventListener("visibilitychange",refreshShelf);
+setInterval(refreshShelf,15000);
