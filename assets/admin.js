@@ -34,21 +34,28 @@ function render() {
   tabs.hidden=false;
   tabs.innerHTML=`<button data-tab="orders" aria-pressed="${current==="orders"}">주문 현황</button><button data-tab="menu" aria-pressed="${current==="menu"}">메뉴 관리</button><button class="logout" data-act="logout">로그아웃</button>`;
   app.innerHTML=current==="menu"?menuView():ordersView();
+  setRequestState(busy);
 }
 async function refresh() {
   if(current==="orders") orders=(await api("/api/admin/orders")).orders;
   else menu=(await api("/api/admin/menu")).menu;
   render();
 }
+function setRequestState(pending) {
+  app.setAttribute("aria-busy", String(pending));
+  for (const button of document.querySelectorAll("#tabs button, [data-act], [data-next], form button")) {
+    button.disabled = pending;
+  }
+}
 async function act(task, silent=false) {
   if(busy)return;
-  busy=true;if(!silent)notice();
+  busy=true;setRequestState(true);if(!silent)notice();
   try{await task();}
   catch(error){
     if(error.status===401)login();
     else if(error.status===409)await refresh();
     if(!silent || error.status!==401)notice(error.message);
-  } finally{busy=false;}
+  } finally{busy=false;setRequestState(false);}
 }
 function poll() {
   clearInterval(timer);
@@ -71,10 +78,10 @@ document.addEventListener("submit",event=>{
 document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(!b || b.type==="submit" && b.closest("form"))return;
+  if(b.dataset.filter){filter=b.dataset.filter;render();return;}
+  if(b.dataset.detail){selected=selected===b.dataset.detail?null:b.dataset.detail;render();return;}
   act(async()=>{
     if(b.dataset.tab){current=b.dataset.tab;await refresh();}
-    else if(b.dataset.filter){filter=b.dataset.filter;render();}
-    else if(b.dataset.detail){selected=selected===b.dataset.detail?null:b.dataset.detail;render();}
     else if(b.dataset.next){await api("/api/admin/orders/"+b.dataset.next,{expected:b.dataset.status});await refresh();}
     else if(b.dataset.act==="refresh")await refresh();
     else if(b.dataset.act==="logout"){await api("/api/admin/logout",{});login();}
