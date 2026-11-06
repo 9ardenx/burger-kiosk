@@ -1,13 +1,17 @@
+import {groupHtml, groupEditor, readGroupEditor} from "./group-editor.js";
+import {validateGroups} from "./choice-rules.js";
 import {escapeText} from "./common.js";
 import {labels,menuPicture} from "./catalog.js";
 function categoryOptions(selected) {
   return Object.entries(labels).map(([id,label])=>`<option value="${id}" ${selected===id?"selected":""}>${label}</option>`).join("");
 }
-function optionRow(option={}) {
+function optionRow(option={}, groups=[]) {
   return `<div class="option-edit" data-option-id="${option.id??""}">
     <label>옵션명<input required maxlength="40" name="option-name" value="${escapeText(option.name??"")}" placeholder="예: 치즈 추가"></label>
     <label>추가 금액 (원)<input type="number" name="option-price" min="0" max="1000000" step="1" required value="${option.extra_price??0}"></label>
-    <button type="button" class="text-btn" data-remove-option aria-label="이 옵션 삭제">삭제</button></div>`;
+    <button type="button" class="text-btn" data-remove-option aria-label="이 옵션 삭제">삭제</button>
+    <div class="extra-branch"><div class="extra-children">${groups.map(g=>groupHtml(g,1)).join("")}</div>
+    <button type="button" class="text-btn" data-variant-action="extra-group">이 추가 옵션에 하위 그룹 추가</button></div></div>`;
 }
 function editorHtml(item) {
   const create=!item;
@@ -22,7 +26,8 @@ function editorHtml(item) {
     <div class="field-pair"><label>분류<select name="category">${categoryOptions(item.category)}</select></label>
     <label>판매 가격 (원)<input type="number" name="price" min="0" max="1000000" step="1" required value="${item.base_price}"></label></div>
     <label>판매 상태<select name="sold"><option value="no" ${item.is_sold_out?"":"selected"}>판매 중</option><option value="yes" ${item.is_sold_out?"selected":""}>품절</option></select></label>
-    <fieldset><legend>추가 옵션</legend><div id="option-rows">${item.options.map(optionRow).join("")}</div>
+    ${groupEditor((item.choice_groups??[]).filter(g=>!g.when_extra))}
+    <fieldset><legend>여러 개를 고르는 추가 옵션</legend><div id="option-rows">${item.options.map(o=>optionRow(o,(item.choice_groups??[]).filter(g=>g.when_extra===o.name))).join("")}</div>
     <button class="secondary" type="button" data-add-option>+ 옵션 추가</button></fieldset>
     <button class="primary wide" type="submit">${create?"메뉴 등록하기":"변경 저장"}</button></section></form>`;
 }
@@ -54,6 +59,12 @@ async function editorData(form,editor) {
   });
   const result={name:data.get("name").trim(),description:data.get("description").trim(),category:data.get("category"),
     base_price:Number(data.get("price")),is_sold_out:data.get("sold")==="yes",options};
+  const groups=readGroupEditor(form.querySelector("#variant-groups"));
+  for(const row of form.querySelectorAll(".option-edit")){
+    const name=row.querySelector('[name="option-name"]').value.trim();
+    for(const g of readGroupEditor(row.querySelector(".extra-children")))groups.push({...g,when_extra:name});
+  }
+  result.choice_groups=validateGroups(groups,options.map(o=>o.name));
   if(editor.item)result.version=editor.item.version;else result.key=editor.key;
   if(form.elements.photo.files.length)result.photo=await jpegForUpload(form.elements.photo.files[0]);
   else if(form.dataset.clearPhoto)result.photo=null;

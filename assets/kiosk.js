@@ -1,3 +1,4 @@
+import {evaluateGroups} from "./choice-rules.js";
 import {labels, menuPicture} from "./catalog.js";
 import {api, app, money, escapeText, itemsHtml, notice} from "./common.js";
 
@@ -39,10 +40,13 @@ function syncPrices() {
     if (!item) continue;
     const options = item.options.filter(o => line.options.includes(o.id));
     line.options = options.map(o=>o.id);
-    line.label = options.map(o=>o.name).join(", ");
+    const selection=evaluateGroups(item.choice_groups??[],line.selections??[],options.map(o=>o.name));
+    line.needsChoice=selection.invalid || selection.missing.length>0;
+    line.selections=selection.ids;
+    line.label=[...selection.snapshot.map(s=>s.name),...options.map(o=>o.name)].join(", ");
     line.version = item.version;
     line.name = item.name;
-    line.unit = item.base_price + options.reduce((sum,o) => sum+o.extra_price,0);
+    line.unit = item.base_price + selection.amount + options.reduce((sum,o) => sum+o.extra_price,0);
   }
 }
 function cartLines(edit = false) {
@@ -50,12 +54,13 @@ function cartLines(edit = false) {
   return state.cart.map((line,i) => `<div class="cart-row"><div class="line-heading"><b>${escapeText(line.name)}</b>
     ${edit?`<button class="text-btn" data-action="remove" data-i="${i}">삭제</button>`:`<span>× ${line.quantity}</span>`}</div>
     <small>${escapeText(line.label || "기본 구성")}${currentMenu(line.id)?"":" · 품절"}</small>
+    ${edit && currentMenu(line.id) && (currentMenu(line.id).choice_groups?.length || line.needsChoice)?`<button class="text-btn" data-action="configure" data-i="${i}">${line.needsChoice?"필수 옵션 다시 선택":"옵션 변경"}</button>`:""}
     <div class="line-heading">${edit?quantityControl(line,i):"<span></span>"}<strong>${money(line.unit*line.quantity)}</strong></div></div>`).join("");
 }
 function cartSummary(edit = false) {
   return `<div class="panel"><h2>장바구니 <span class="counter">${count()}</span></h2>${cartLines(edit)}
     <div class="total"><span>합계</span><strong>${money(total())}</strong></div>
-    ${button(edit?"review":"cart", edit?"주문 확인":"장바구니 보기",true,!count()||(edit && state.cart.some(line=>!currentMenu(line.id))))}</div>`;
+    ${button(edit?"review":"cart", edit?"주문 확인":"장바구니 보기",true,!count()||(edit && state.cart.some(line=>!currentMenu(line.id)||line.needsChoice)))}</div>`;
 }
 function menuView() {
   const visible=menu.filter(item=>categoryFilter==="all" || (item.category??"burger")===categoryFilter);
@@ -67,29 +72,73 @@ function menuView() {
       `<button data-category="${id}" aria-pressed="${id===categoryFilter}">${title}</button>`).join("")}</nav><div class="shop-layout"><section class="menu-grid" aria-label="판매 중인 메뉴">
     ${cards||'<p class="panel">이 분류에는 판매 중인 메뉴가 없습니다.</p>'}</section><aside>${cartSummary()}</aside></div>`;
 }
-function optionView(id) {
-  const item = currentMenu(id);
-  if (!item) return;
-  dialog.innerHTML = `<form id="option-form"><button type="button" class="close" data-action="close" aria-label="닫기">×</button>
-    <div class="dialog-art ${item.photo_key?"with-photo":""} ${item.kind==="chicken"?"sage":"oat"}"><img src="${menuPicture(item)}" alt=""></div><div class="dialog-body">
-    <h2 id="option-title">${escapeText(item.name)}</h2><p class="muted">${escapeText(item.description)}</p>
+function customerGroups(groups, ids, nested=false) {
+  return groups.map(group=>{
+    const current=group.choices.find(c=>ids.includes(c.id));
+    const radio=(id,name,price,checked)=>`<label class="option single-choice"><span><input type="radio"
+      name="v-${escapeText(group.id)}" data-choice value="${escapeText(id)}" ${checked?"checked":""}> ${escapeText(name)}</span>
+      ${price?`<b>+${money(price)}</b>`:""}</label>`;
+    return `<div class="pick-group ${nested?"pick-child":""}"><fieldset><legend>${escapeText(group.name)} <small>${group.required?"필수 · 1개":"선택 · 최대 1개"}</small></legend>
+      ${group.required?"":radio("","선택 안 함",0,!current)}
+      ${group.choices.map(c=>radio(c.id,c.name,c.extra_price,current?.id===c.id)).join("")}</fieldset>
+      ${current?customerGroups(current.children,ids,true):""}</div>`;
+  }).join("");
+}
+function optionView(id, editIndex=null) {
+  const item=currentMenu(id);
+  if(!item)return;
+  const editing=editIndex===null?null:state.cart[editIndex];
+  const groups=item.choice_groups??[];
+  let choiceIds=evaluateGroups(groups,editing?.selections??[],item.options.filter(o=>editing?.options.includes(o.id)).map(o=>o.name)).ids;
+  dialog.innerHTML=`<form id="option-form"><button type="button" class="close" data-action="close" aria-label="닫기">×</button>
+    <div class="dialog-art ${item.photo_key?"with-photo":""} ${item.kind==="chicken"?"sage":"oat"}"><img src="${menuPicture(item)}" alt=""></div>
+    <div class="dialog-body"><h2 id="option-title">${escapeText(item.name)}</h2><p class="muted">${escapeText(item.description)}</p>
     <div class="line-heading"><span>기본 가격</span><b>${money(item.base_price)}</b></div>
-    ${item.options.length?`<fieldset><legend>추가 옵션</legend>${item.options.map(o=>`<label class="option"><span><input type="checkbox" value="${o.id}"> ${escapeText(o.name)}</span><b>+${money(o.extra_price)}</b></label>`).join("")}</fieldset>`:""}
-    <button type="submit" class="primary wide"><span id="option-price">${money(item.base_price)}</span> · 장바구니에 담기</button></div></form>`;
-  const selected = () => item.options.filter(opt => dialog.querySelector(`input[value="${opt.id}"]`)?.checked);
-  const price = () => item.base_price + selected().reduce((sum,opt)=>sum+opt.extra_price,0);
-  dialog.onchange = () => { dialog.querySelector("#option-price").textContent = money(price()); };
-  dialog.querySelector("form").onsubmit = event => {
+    ${item.options.length?`<fieldset><legend>추가 옵션</legend>${item.options.map(o=>`<label class="option"><span><input type="checkbox" value="${o.id}" ${editing?.options.includes(o.id)?"checked":""}> ${escapeText(o.name)}</span><b>+${money(o.extra_price)}</b></label>`).join("")}</fieldset>`:""}
+    <div id="choice-fields"></div><p class="choice-message" aria-live="polite"></p><button type="submit" class="primary wide"><span id="option-price"></span> · ${editing?"선택 변경":"장바구니에 담기"}</button></div></form>`;
+  const form=dialog.querySelector("form"), fields=form.querySelector("#choice-fields");
+  const extras=()=>item.options.filter(opt=>form.querySelector(`input[type=checkbox][value="${opt.id}"]`)?.checked);
+  function selection() {
+    const selected=extras(), result=evaluateGroups(groups,choiceIds,selected.map(o=>o.name));
+    return {...result, extras:selected, unit:item.base_price+result.amount+selected.reduce((n,o)=>n+o.extra_price,0)};
+  }
+  function updatePrice() {
+    const result=selection();
+    form.querySelector("#option-price").textContent=money(result.unit);
+    form.querySelector('[type=submit]').disabled=result.missing.length>0 || result.invalid;
+    form.querySelector(".choice-message").textContent=result.missing.length?"필수 선택: "+result.missing.join(", "):"";
+  }
+  const visibleGroups=()=>groups.filter(g=>!g.when_extra || extras().some(o=>o.name===g.when_extra));
+  fields.innerHTML=customerGroups(visibleGroups(),choiceIds);
+  updatePrice();
+  dialog.onchange=event=>{
+    if(event.target.matches("[data-choice],input[type=checkbox]")){
+      const inputs=[...fields.querySelectorAll("[data-choice]:checked")].map(i=>i.value).filter(Boolean);
+      const {name,value}=event.target;
+      choiceIds=evaluateGroups(groups,inputs,extras().map(o=>o.name)).ids;
+      fields.innerHTML=customerGroups(visibleGroups(),choiceIds);
+      fields.querySelector(`input[name="${CSS.escape(name)}"][value="${CSS.escape(value)}"]`)?.focus({preventScroll:true});
+    }
+    updatePrice();
+  };
+  form.onsubmit=event=>{
     event.preventDefault();
-    const options = selected().map(o=>o.id);
-    const existing = state.cart.find(l=>l.id===id && l.options.join()===options.join());
-    if (existing && existing.quantity>=99) {dialog.close();notice("한 항목은 최대 99개까지 담을 수 있습니다.");return;}
-    if (existing) {existing.quantity++;existing.version=item.version;existing.unit=price();existing.name=item.name;existing.label=selected().map(o=>o.name).join(", ");}
-    else state.cart.push({id,name:item.name,options,label:selected().map(o=>o.name).join(", "),quantity:1,unit:price(),version:item.version});
-    invalidateOrder(); dialog.close(); go("cart");
+    const result=selection();
+    if(result.missing.length || result.invalid)return;
+    const options=result.extras.map(o=>o.id), selections=result.ids;
+    const label=[...result.snapshot.map(s=>s.name), ...result.extras.map(o=>o.name)].join(", ");
+    const cart=state.cart.filter((line,i)=>i!==editIndex);
+    const other=cart.find(l=>l.id===id && l.options.join()===options.join() && (l.selections??[]).join()===selections.join());
+    const quantity=(editing?.quantity??1)+(other?.quantity??0);
+    if(quantity>99){dialog.close();notice("한 항목은 최대 99개까지 담을 수 있습니다.");return;}
+    const line={id,name:item.name,options,selections,label,quantity,unit:result.unit,version:item.version};
+    if(other)Object.assign(other,line,{needsChoice:false});
+    else cart.splice(editing?Math.min(editIndex,cart.length):cart.length,0,line);
+    state.cart=cart;invalidateOrder();dialog.close();go("cart");
   };
   dialog.showModal();
 }
+
 function checkoutView() {
   const lines = order ? itemsHtml(order.items) : cartLines();
   const amount = order ? order.total : total();
@@ -135,7 +184,7 @@ async function pay() {
   if (!state.checkoutKey) {state.checkoutKey=crypto.randomUUID();save();}
   if (!order) {
     order=await api("/api/orders",{key:state.checkoutKey,items:state.cart.map(l=>({
-      menu_id:l.id,options:l.options,quantity:l.quantity,expected_unit:l.unit,expected_version:l.version
+      menu_id:l.id,options:l.options,selections:l.selections??[],quantity:l.quantity,expected_unit:l.unit,expected_version:l.version
     }))});
     state.orderId=order.id;save();
   }
@@ -196,6 +245,7 @@ document.addEventListener("click",event=>{
   const action=control.dataset.action;
   if(action==="close") {dialog.close();return;}
   run(async()=>{
+    if(action==="configure"){const index=Number(control.dataset.i);return optionView(state.cart[index].id,index);}
     if(action==="choose") return optionView(Number(control.dataset.id));
     if(action==="reset"){categoryFilter="all";state=defaults();order=null;await loadMenu();go("menu");return;}
     if(action==="edit"){invalidateOrder();await loadMenu();syncPrices();go("cart");return;}
