@@ -3,7 +3,7 @@ CREATE TABLE IF NOT EXISTS menu (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
     kind TEXT NOT NULL, base_price INTEGER NOT NULL CHECK(base_price >= 0),
     is_sold_out INTEGER NOT NULL DEFAULT 0 CHECK(is_sold_out IN (0,1)),
-    category TEXT NOT NULL DEFAULT 'burger', photo_key TEXT, registration_key TEXT,
+    category TEXT NOT NULL DEFAULT 'burger', photo_key TEXT, registration_key TEXT, choice_groups TEXT NOT NULL DEFAULT '[]',
     version INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS menu_option (
@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE TABLE IF NOT EXISTS order_item (
     id INTEGER PRIMARY KEY, order_id TEXT NOT NULL REFERENCES orders(id),
     menu_id INTEGER NOT NULL REFERENCES menu(id), name TEXT NOT NULL,
-    item_price INTEGER NOT NULL, quantity INTEGER NOT NULL CHECK(quantity > 0)
+    choice_snapshot TEXT NOT NULL DEFAULT '[]', item_price INTEGER NOT NULL, quantity INTEGER NOT NULL CHECK(quantity > 0)
 );
 CREATE TABLE IF NOT EXISTS order_item_option (
     id INTEGER PRIMARY KEY, order_item_id INTEGER NOT NULL REFERENCES order_item(id),

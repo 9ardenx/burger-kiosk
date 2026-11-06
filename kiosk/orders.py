@@ -3,6 +3,7 @@ import hashlib
 import json
 from uuid import uuid4
 
+from .variants import resolve_choices
 from .store import Problem, identifier, integer
 
 NEXT_STATE = {"PAID": "PREPARING", "PREPARING": "READY", "READY": "COMPLETED"}
@@ -21,7 +22,7 @@ def order_view(db, row):
         options = [dict(opt) for opt in db.execute(
             "SELECT name,option_price FROM order_item_option WHERE order_item_id=? ORDER BY id", (item["id"],)
         )]
-        items.append({"name": item["name"], "quantity": item["quantity"], "price": item["item_price"], "options": options})
+        items.append({"name": item["name"], "quantity": item["quantity"], "price": item["item_price"], "options": json.loads(item["choice_snapshot"]) + options})
     payment = db.execute(
         "SELECT id,status,mode,pg_tid IS NOT NULL AS has_key FROM payment WHERE order_id=? ORDER BY rowid DESC LIMIT 1",
         (row["id"],),
@@ -47,11 +48,16 @@ def quote_item(db, line):
         raise Problem("선택 옵션이 변경되었습니다. 장바구니에서 새 구성을 확인해 주세요.", 409, "CART_CHANGED")
     options = [available[k] for k in sorted(choices)]
     unit = item["base_price"] + sum(option["extra_price"] for option in options)
+    try:
+        snapshot = resolve_choices(json.loads(item["choice_groups"]), line.get("selections", []), [o["name"] for o in options])
+    except ValueError as exc:
+        raise Problem(str(exc), 409, "CART_CHANGED") from exc
+    unit += sum(choice["option_price"] for choice in snapshot)
     if line.get("expected_version") is not None and line["expected_version"] != item["version"]:
         raise Problem(f"{item['name']} 메뉴 정보가 변경되었습니다. 최신 구성을 확인해 주세요.", 409, "CART_CHANGED")
     if unit != line.get("expected_unit"):
         raise Problem(f"{item['name']} 가격이 변경되었습니다. 새 금액을 확인해 주세요.", 409, "CART_CHANGED")
-    return item, options, quantity, unit
+    return item, options, snapshot, quantity, unit
 
 
 def create_order(db, customer, data):
@@ -66,14 +72,14 @@ def create_order(db, customer, data):
             raise Problem("장바구니가 바뀌었습니다. 주문을 다시 확인해 주세요.", 409)
         return order_view(db, previous)
     lines = [quote_item(db, line) for line in cart]
-    total = sum(quantity * unit for _, _, quantity, unit in lines)
+    total = sum(quantity * unit for _, _, _, quantity, unit in lines)
     order_id = uuid4().hex
     db.execute("INSERT INTO orders(id,customer,request_key,cart_signature,total_amount) VALUES(?,?,?,?,?)",
                (order_id, customer, key, signature, total))
-    for item, options, quantity, _ in lines:
+    for item, options, snapshot, quantity, _ in lines:
         result = db.execute(
-            "INSERT INTO order_item(order_id,menu_id,name,item_price,quantity) VALUES(?,?,?,?,?)",
-            (order_id, item["id"], item["name"], item["base_price"], quantity),
+            "INSERT INTO order_item(order_id,menu_id,name,item_price,quantity,choice_snapshot) VALUES(?,?,?,?,?,?)",
+            (order_id, item["id"], item["name"], item["base_price"], quantity, json.dumps(snapshot, ensure_ascii=False)),
         )
         db.executemany("INSERT INTO order_item_option(order_item_id,option_id,name,option_price) VALUES(?,?,?,?)",
                        [(result.lastrowid, opt["id"], opt["name"], opt["extra_price"]) for opt in options])

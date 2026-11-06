@@ -2,6 +2,9 @@
 import base64
 import binascii
 import hashlib
+import json
+
+from .variants import validate_groups
 
 from .store import Problem, identifier, integer
 
@@ -59,6 +62,12 @@ def photo_key(db, encoded):
 
 def save_listing(db, data, menu_id=None):
     name, description, category, price, sold, options = read_definition(data)
+    groups = None
+    if "choice_groups" in data:
+        try:
+            groups = json.dumps(validate_groups(data["choice_groups"], [title for _, title, _ in options]), ensure_ascii=False)
+        except ValueError as exc:
+            raise Problem(str(exc)) from exc
     if menu_id is None:
         request_key = identifier(data.get("key"))
         existing = db.execute("SELECT id FROM menu WHERE registration_key=?", (request_key,)).fetchone()
@@ -73,9 +82,11 @@ def save_listing(db, data, menu_id=None):
         menu_id = row.lastrowid
     else:
         version = integer(data.get("version"), 0, 2**31-1, "메뉴 버전")
-        old = db.execute("SELECT version,photo_key FROM menu WHERE id=?", (menu_id,)).fetchone()
+        old = db.execute("SELECT version,photo_key,choice_groups FROM menu WHERE id=?", (menu_id,)).fetchone()
         if not old or old["version"] != version:
             raise Problem("메뉴가 변경되었습니다. 최신 정보를 확인해 주세요.", 409, "MENU_CHANGED")
+        if groups is None and any(g.get("when_extra") and g["when_extra"] not in {o[1] for o in options} for g in json.loads(old["choice_groups"])):
+            raise Problem("선택 그룹을 편집할 수 있도록 관리자 화면을 새로고침해 주세요.", 409, "MENU_CHANGED")
         new_photo = photo_key(db, data["photo"]) if "photo" in data else old["photo_key"]
         db.execute("""UPDATE menu SET name=?,description=?,category=?,base_price=?,is_sold_out=?,photo_key=?,
                       version=version+1 WHERE id=?""", (name, description, category, price, sold, new_photo, menu_id))
@@ -89,4 +100,6 @@ def save_listing(db, data, menu_id=None):
         else:
             db.execute("UPDATE menu_option SET name=?,extra_price=?,active=1 WHERE menu_id=? AND id=?",
                        (title, extra, menu_id, oid))
+    if groups is not None:
+        db.execute("UPDATE menu SET choice_groups=? WHERE id=?", (groups, menu_id))
     return menu_id

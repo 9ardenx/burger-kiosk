@@ -1,3 +1,4 @@
+import {handleVariantButton} from "./group-editor.js";
 import {editorHtml,editorData,optionRow} from "./menu-editor.js";
 import {categoryName,menuPicture} from "./catalog.js";
 import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
@@ -91,6 +92,7 @@ document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(!b || b.type==="submit" && b.closest("form"))return;
 if(busy)return;
+  if(handleVariantButton(b))return;
   if(b.hasAttribute("data-new-menu") || b.dataset.editMenu) {
     resetPreview();editor={item:menu.find(item=>item.id===Number(b.dataset.editMenu))||null,key:crypto.randomUUID()};
     notice();render();app.querySelector('[name="name"]').focus();return;

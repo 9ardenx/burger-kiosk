@@ -1,3 +1,6 @@
+import {validateGroups, evaluateGroups} from "../docs/assets/choice-rules.js";
+import sodaGroups from "./drink-example.json" with {type:"json"};
+
 const FRONTEND = "https://9ardenx.github.io";
 const NEXT = Object.freeze({PAID:"PREPARING", PREPARING:"READY", READY:"COMPLETED"});
 const utf8 = new TextEncoder();
@@ -30,26 +33,30 @@ async function catalog(db, includeSold=false) {
         (2,'치킨버거','크리스피 치킨 패티, 양상추, 마요 소스','chicken',6000)`),
       db.prepare(`INSERT OR IGNORE INTO menu(name,description,kind,category,base_price,registration_key) VALUES
         ('감자튀김','바삭하게 튀긴 감자에 소금을 살짝 더했어요.','fries','side',2000,'starter-fries-v1'),
-        ('콜라','얼음을 곁들인 시원한 탄산음료','cola','drink',1500,'starter-cola-v1')`),
+        ('탄산음료','음료 종류와 세부 옵션을 골라 주세요.','cola','drink',1500,'starter-cola-v1')`),
+      statement(db,"UPDATE menu SET choice_groups=? WHERE registration_key='starter-cola-v1' AND version=0",JSON.stringify(sodaGroups)),
       db.prepare(`INSERT OR IGNORE INTO menu_option(id,menu_id,name,extra_price) VALUES
-        (1,1,'치즈 추가',500),(2,1,'패티 추가',1800),(3,2,'치즈 추가',500),(4,2,'매콤 소스 추가',300)`)
+        (1,1,'치즈 추가',500),(2,1,'패티 추가',1800),(3,2,'치즈 추가',500),(4,2,'매콤 소스 추가',300),
+        (5,1,'탄산음료 감자튀김',2000),(6,2,'탄산음료 감자튀김',2000)`),
+      statement(db,"UPDATE menu SET choice_groups=? WHERE id IN (1,2) AND version=0",
+        JSON.stringify(sodaGroups.map(g=>({...g,when_extra:'탄산음료 감자튀김'}))))
     ]);
   }
   const [menus,options]=await db.batch([
-    db.prepare("SELECT id,name,description,kind,base_price,is_sold_out,version,category,photo_key FROM menu " + (includeSold?"":"WHERE is_sold_out=0 ") + "ORDER BY id"),
+    db.prepare("SELECT id,name,description,kind,base_price,is_sold_out,version,category,photo_key,choice_groups FROM menu " + (includeSold?"":"WHERE is_sold_out=0 ") + "ORDER BY id"),
     db.prepare("SELECT id,menu_id,name,extra_price FROM menu_option WHERE active=1 ORDER BY id")
   ]);
-  return menus.results.map(menu=>({...menu, options:options.results.filter(o=>o.menu_id===menu.id)}));
+  return menus.results.map(menu=>({...menu, choice_groups:JSON.parse(menu.choice_groups), options:options.results.filter(o=>o.menu_id===menu.id)}));
 }
 
 const orderSelect = `SELECT o.id,o.number,o.status,o.total,o.created_at,
-  (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,
+  (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,'variants',json(i.choice_snapshot),
     'options',json((SELECT json_group_array(json_object('name',x.name,'option_price',x.option_price))
       FROM order_item_option x WHERE x.item_id=i.id)))) FROM order_item i WHERE i.order_id=o.id) AS items,
   (SELECT json_object('id',p.id,'status',p.status,'mode',p.mode) FROM payment p
      WHERE p.order_id=o.id ORDER BY p.rowid DESC LIMIT 1) AS payment FROM orders o`;
 function toView(row) {
-  return {...row,items:JSON.parse(row.items),payment:row.payment?JSON.parse(row.payment):null};
+  return {...row,items:JSON.parse(row.items).map(({variants,options,...item})=>({...item,options:[...variants,...options]})),payment:row.payment?JSON.parse(row.payment):null};
 }
 async function readOrder(db,id,customer) {
   const row=await statement(db,orderSelect+" WHERE o.id=? AND o.customer=?",id,customer).first();
@@ -76,12 +83,14 @@ async function createOrder(db,customer,body) {
           new Set(line.options).size===line.options.length,"옵션을 확인해 주세요.");
     const options=line.options.map(id=>menu.options.find(o=>o.id===id));
     check(options.every(Boolean),"옵션이 변경되었습니다. 장바구니에서 새 구성을 확인해 주세요.",409,"CART_CHANGED");
-    const unit=menu.base_price+options.reduce((n,o)=>n+o.extra_price,0);
+    const selection=evaluateGroups(menu.choice_groups,line.selections??[],options.map(o=>o.name));
+    check(!selection.invalid && !selection.missing.length,"음료 종류 등 필수 구성을 다시 선택해 주세요.",409,"CART_CHANGED");
+    const unit=menu.base_price+selection.amount+options.reduce((n,o)=>n+o.extra_price,0);
     check(line.expected_version==null || line.expected_version===menu.version,
       `${menu.name} 메뉴 정보가 변경되었습니다. 최신 구성을 확인해 주세요.`,409,"CART_CHANGED");
     check(line.expected_unit===unit,`${menu.name} 가격이 변경되었습니다. 새 금액을 확인해 주세요.`,409,"CART_CHANGED");
     total+=unit*line.quantity;
-    return {menu,options,quantity:line.quantity};
+    return {menu,options,snapshot:selection.snapshot,quantity:line.quantity};
   });
   const tag=crypto.randomUUID();
   const menuVersions=[...new Map(lines.map(l=>[l.menu.id,l.menu.version]))];
@@ -93,8 +102,8 @@ async function createOrder(db,customer,body) {
   const created="EXISTS(SELECT 1 FROM orders WHERE id=? AND creation_tag=?)";
   for(const line of lines){
     const itemId=crypto.randomUUID();
-    commands.push(statement(db,`INSERT INTO order_item(id,order_id,menu_id,name,quantity,price)
-      SELECT ?,?,?,?,?,? WHERE ${created}`,itemId,id,line.menu.id,line.menu.name,line.quantity,line.menu.base_price,id,tag));
+    commands.push(statement(db,`INSERT INTO order_item(id,order_id,menu_id,name,quantity,price,choice_snapshot)
+      SELECT ?,?,?,?,?,?,? WHERE ${created}`,itemId,id,line.menu.id,line.menu.name,line.quantity,line.menu.base_price,JSON.stringify(line.snapshot),id,tag));
     for(const opt of line.options) commands.push(statement(db,`INSERT INTO order_item_option(id,item_id,option_id,name,option_price)
       SELECT ?,?,?,?,? WHERE ${created}`,crypto.randomUUID(),itemId,opt.id,opt.name,opt.extra_price,id,tag));
   }
@@ -163,6 +172,11 @@ async function storePhoto(bucket, photo) {
 }
 async function saveMenu(db,env,body,id=null) {
   const entry=menuDefinition(body);
+  let groups=null;
+  if(Object.hasOwn(body,"choice_groups")) {
+    try{groups=JSON.stringify(validateGroups(body.choice_groups,entry.options.map(o=>o.name)));}
+    catch(error){throw new Problem(error.message);}
+  }
   const create=id===null;
   let parent, args, final, existingPhoto=null;
   const statements=[];
@@ -174,10 +188,12 @@ async function saveMenu(db,env,body,id=null) {
     args=[body.key];
   } else {
     check(Number.isInteger(body.version)&&body.version>=0,"메뉴 버전을 확인해 주세요.");
-    const old=await statement(db,"SELECT version,photo_key FROM menu WHERE id=?",id).first();
+    const old=await statement(db,"SELECT version,photo_key,choice_groups FROM menu WHERE id=?",id).first();
     check(old && old.version===body.version,"메뉴가 변경되었습니다. 다시 확인해 주세요.",409,"MENU_CHANGED");
     const allowed=new Set((await all(db,"SELECT id FROM menu_option WHERE menu_id=? AND active=1",id)).map(o=>o.id));
     check(entry.options.every(o=>o.id===null || allowed.has(o.id)),"해당 메뉴의 옵션만 수정할 수 있습니다.");
+    if(groups===null)check(JSON.parse(old.choice_groups).every(g=>!g.when_extra || entry.options.some(o=>o.name===g.when_extra)),
+      "선택 그룹을 편집하려면 관리자 화면을 새로고침해 주세요.",409,"MENU_CHANGED");
     existingPhoto=old.photo_key;
     parent="SELECT id FROM menu WHERE id=? AND version=?";
     args=[id,body.version];
@@ -185,13 +201,13 @@ async function saveMenu(db,env,body,id=null) {
   const photo=Object.hasOwn(body,"photo")?await storePhoto(env.BUCKET,body.photo):existingPhoto;
   if(create) {
     statements.push(statement(db,`INSERT OR IGNORE INTO menu(name,description,category,kind,base_price,is_sold_out,
-      photo_key,registration_key,version) VALUES(?,?,?,'custom',?,?,?,?,-1)`,
-      entry.name,entry.description,entry.category,entry.price,entry.sold,photo,body.key));
+      photo_key,registration_key,choice_groups,version) VALUES(?,?,?,'custom',?,?,?,?,?,-1)`,
+      entry.name,entry.description,entry.category,entry.price,entry.sold,photo,body.key,groups??"[]"));
     final=statement(db,"UPDATE menu SET version=0 WHERE registration_key=? AND version=-1",body.key);
   } else {
     statements.push(statement(db,`UPDATE menu_option SET active=0 WHERE menu_id=(${parent}) AND active=1`,...args));
     final=statement(db,`UPDATE menu SET name=?,description=?,category=?,base_price=?,is_sold_out=?,photo_key=?,
-      version=version+1 WHERE id=? AND version=?`,entry.name,entry.description,entry.category,entry.price,entry.sold,photo,...args);
+      choice_groups=COALESCE(?,choice_groups),version=version+1 WHERE id=? AND version=?`,entry.name,entry.description,entry.category,entry.price,entry.sold,photo,groups,...args);
   }
   for(const option of entry.options) {
     statements.push(option.id===null

@@ -1,4 +1,5 @@
 """SQLite connections, demo menu and shared input validation."""
+import json
 import re
 import sqlite3
 from contextlib import closing, contextmanager
@@ -44,8 +45,10 @@ def initialize(path):
         db.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
         db.execute("BEGIN IMMEDIATE")
         # Upgrade an existing store without replacing its menus or order history.
+        upgrade_choices = "choice_groups" not in {r[1] for r in db.execute("PRAGMA table_info(menu)")}
         for table, additions in (
-            ("menu", {"category": "TEXT NOT NULL DEFAULT 'burger'", "photo_key": "TEXT", "registration_key": "TEXT"}),
+            ("menu", {"category": "TEXT NOT NULL DEFAULT 'burger'", "photo_key": "TEXT", "registration_key": "TEXT", "choice_groups": "TEXT NOT NULL DEFAULT '[]'"}),
+            ("order_item", {"choice_snapshot": "TEXT NOT NULL DEFAULT '[]'"}),
             ("menu_option", {"active": "INTEGER NOT NULL DEFAULT 1"}),
         ):
             columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -53,7 +56,8 @@ def initialize(path):
                 if name not in columns:
                     db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS menu_registration ON menu(registration_key)")
-        if not db.execute("SELECT 1 FROM menu LIMIT 1").fetchone():
+        empty = not db.execute("SELECT 1 FROM menu LIMIT 1").fetchone()
+        if empty:
             db.executemany("INSERT INTO menu(id,name,description,kind,base_price) VALUES(?,?,?,?,?)", [
                 (1, "클래식버거", "그릴드 비프 패티, 토마토, 양상추", "classic", 5500),
                 (2, "치킨버거", "크리스피 치킨 패티, 양상추, 마요 소스", "chicken", 6000),
@@ -69,11 +73,33 @@ def initialize(path):
             ("콜라", "얼음을 곁들인 시원한 탄산음료", "cola", "drink", 1500, "starter-cola-v1"),
         ])
 
+        soda_groups = (Path(__file__).resolve().parents[1] / "cloud/drink-example.json").read_text(encoding="utf-8")
+        db.execute("""UPDATE menu SET name='탄산음료', description='음료 종류와 세부 옵션을 골라 주세요.',
+                      choice_groups=?, version=version+1 WHERE registration_key='starter-cola-v1'
+                      AND version=0 AND name='콜라' AND choice_groups='[]'""", (soda_groups,))
+
+        if empty or upgrade_choices:
+            combo_name = "탄산음료 감자튀김"
+            combo_groups = json.loads(soda_groups)
+            combo_groups[0]["when_extra"] = combo_name
+            for mid, kind in ((1, "classic"), (2, "chicken")):
+                listing = db.execute("SELECT version FROM menu WHERE id=? AND kind=?", (mid, kind)).fetchone()
+                if not listing:
+                    continue
+                extra = db.execute("SELECT 1 FROM menu_option WHERE menu_id=? AND name=? AND active=1", (mid, combo_name)).fetchone()
+                if not extra and listing[0] == 0:
+                    db.execute("INSERT INTO menu_option(menu_id,name,extra_price) VALUES(?,?,2000)", (mid, combo_name))
+                    extra = True
+                if extra:
+                    db.execute("UPDATE menu SET choice_groups=?,version=version+? WHERE id=?",
+                               (json.dumps(combo_groups, ensure_ascii=False), int(not empty), mid))
+
 
 def menu_list(db, *, all_items=False):
     condition = "" if all_items else "WHERE is_sold_out=0"
-    rows = [dict(row) for row in db.execute(f"SELECT id,name,description,kind,category,photo_key,base_price,is_sold_out,version FROM menu {condition} ORDER BY id")]
+    rows = [dict(row) for row in db.execute(f"SELECT id,name,description,kind,category,photo_key,base_price,is_sold_out,version,choice_groups FROM menu {condition} ORDER BY id")]
     for row in rows:
+        row["choice_groups"] = json.loads(row["choice_groups"])
         row["options"] = [dict(option) for option in db.execute(
             "SELECT id,name,extra_price FROM menu_option WHERE menu_id=? AND active=1 ORDER BY id", (row["id"],)
         )]

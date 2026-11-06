@@ -26,7 +26,7 @@ class CatalogTests(unittest.TestCase):
             self.assertEqual(len(rows[0]["options"]), 1)
         initialize(self.path)
         with connection(self.path) as db:
-            self.assertEqual([i["name"] for i in menu_list(db)].count("콜라"), 1)
+            self.assertEqual([i["name"] for i in menu_list(db)].count("탄산음료"), 1)
 
     def test_removed_option_preserves_snapshot_and_blocks_stale_cart(self):
         with connection(self.path, write=True) as db:

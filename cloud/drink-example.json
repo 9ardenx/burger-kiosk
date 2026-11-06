@@ -1,0 +1,67 @@
+[
+  {
+    "id": "drink_type",
+    "name": "음료 종류",
+    "required": true,
+    "choices": [
+      {
+        "id": "cola",
+        "name": "콜라",
+        "extra_price": 0,
+        "children": [
+          {
+            "id": "cola_type",
+            "name": "콜라 종류",
+            "required": true,
+            "choices": [
+              {
+                "id": "cola_regular",
+                "name": "일반",
+                "extra_price": 0,
+                "children": []
+              },
+              {
+                "id": "cola_zero",
+                "name": "제로",
+                "extra_price": 0,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "cider",
+        "name": "사이다",
+        "extra_price": 0,
+        "children": [
+          {
+            "id": "cider_type",
+            "name": "사이다 종류",
+            "required": true,
+            "choices": [
+              {
+                "id": "cider_regular",
+                "name": "일반",
+                "extra_price": 0,
+                "children": []
+              },
+              {
+                "id": "cider_zero",
+                "name": "제로",
+                "extra_price": 0,
+                "children": []
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "orange",
+        "name": "오렌지 탄산",
+        "extra_price": 0,
+        "children": []
+      }
+    ]
+  }
+]

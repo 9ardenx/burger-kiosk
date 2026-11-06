@@ -4,6 +4,7 @@ import { sql } from "drizzle-orm";
 export const menus = sqliteTable("menu", {
   id: integer().primaryKey(), name: text().notNull(), description: text().notNull(),
   kind: text().notNull(), base_price: integer().notNull(), is_sold_out: integer().notNull().default(0),
+  choice_groups: text().notNull().default("[]"),
   category: text().notNull().default("burger"), photo_key: text(), registration_key: text().unique(),
   version: integer().notNull().default(0)
 });
@@ -20,6 +21,7 @@ export const orders = sqliteTable("orders", {
 export const items = sqliteTable("order_item", {
   id: text().primaryKey(), order_id: text().notNull().references(() => orders.id),
   menu_id: integer().notNull().references(() => menus.id), name: text().notNull(),
+  choice_snapshot: text().notNull().default("[]"),
   quantity: integer().notNull(), price: integer().notNull()
 }, t => [index("items_by_order").on(t.order_id)]);
 export const choices = sqliteTable("order_item_option", {
