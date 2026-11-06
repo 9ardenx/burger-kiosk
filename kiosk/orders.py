@@ -42,11 +42,13 @@ def quote_item(db, line):
     choices = line.get("options")
     if not isinstance(choices, list) or len(choices)>20 or any(type(x) is not int for x in choices):
         raise Problem("선택 옵션을 확인해 주세요.")
-    available = {r["id"]: r for r in db.execute("SELECT * FROM menu_option WHERE menu_id=?", (menu_id,))}
+    available = {r["id"]: r for r in db.execute("SELECT * FROM menu_option WHERE menu_id=? AND active=1", (menu_id,))}
     if len(set(choices)) != len(choices) or not set(choices).issubset(available):
-        raise Problem("이 메뉴에서 선택할 수 없는 옵션입니다.")
+        raise Problem("선택 옵션이 변경되었습니다. 장바구니에서 새 구성을 확인해 주세요.", 409, "CART_CHANGED")
     options = [available[k] for k in sorted(choices)]
     unit = item["base_price"] + sum(option["extra_price"] for option in options)
+    if line.get("expected_version") is not None and line["expected_version"] != item["version"]:
+        raise Problem(f"{item['name']} 메뉴 정보가 변경되었습니다. 최신 구성을 확인해 주세요.", 409, "CART_CHANGED")
     if unit != line.get("expected_unit"):
         raise Problem(f"{item['name']} 가격이 변경되었습니다. 새 금액을 확인해 주세요.", 409, "CART_CHANGED")
     return item, options, quantity, unit

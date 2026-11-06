@@ -3,11 +3,12 @@ CREATE TABLE IF NOT EXISTS menu (
     id INTEGER PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL,
     kind TEXT NOT NULL, base_price INTEGER NOT NULL CHECK(base_price >= 0),
     is_sold_out INTEGER NOT NULL DEFAULT 0 CHECK(is_sold_out IN (0,1)),
+    category TEXT NOT NULL DEFAULT 'burger', photo_key TEXT, registration_key TEXT,
     version INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS menu_option (
     id INTEGER PRIMARY KEY, menu_id INTEGER NOT NULL REFERENCES menu(id),
-    name TEXT NOT NULL, extra_price INTEGER NOT NULL CHECK(extra_price >= 0)
+    name TEXT NOT NULL, extra_price INTEGER NOT NULL CHECK(extra_price >= 0), active INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS orders (
     id TEXT PRIMARY KEY, customer TEXT NOT NULL, request_key TEXT NOT NULL,
@@ -38,3 +39,5 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_paid_payment ON payment(order_id) WHERE st
 CREATE INDEX IF NOT EXISTS order_items_by_order ON order_item(order_id);
 CREATE INDEX IF NOT EXISTS options_by_item ON order_item_option(order_item_id);
 CREATE INDEX IF NOT EXISTS payments_by_order ON payment(order_id);
+
+CREATE TABLE IF NOT EXISTS menu_photo (key TEXT PRIMARY KEY, content BLOB NOT NULL);

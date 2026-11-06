@@ -13,3 +13,5 @@ export async function api(path, body) {
   });
   return data;
 }
+
+export const photoUrl = key => "/api/menu-photos/"+key;

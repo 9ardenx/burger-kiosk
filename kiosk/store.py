@@ -43,23 +43,39 @@ def initialize(path):
         db.execute("PRAGMA journal_mode=WAL")
         db.executescript(Path(__file__).with_name("schema.sql").read_text(encoding="utf-8"))
         db.execute("BEGIN IMMEDIATE")
+        # Upgrade an existing store without replacing its menus or order history.
+        for table, additions in (
+            ("menu", {"category": "TEXT NOT NULL DEFAULT 'burger'", "photo_key": "TEXT", "registration_key": "TEXT"}),
+            ("menu_option", {"active": "INTEGER NOT NULL DEFAULT 1"}),
+        ):
+            columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+            for name, definition in additions.items():
+                if name not in columns:
+                    db.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS menu_registration ON menu(registration_key)")
         if not db.execute("SELECT 1 FROM menu LIMIT 1").fetchone():
             db.executemany("INSERT INTO menu(id,name,description,kind,base_price) VALUES(?,?,?,?,?)", [
                 (1, "클래식버거", "그릴드 비프 패티, 토마토, 양상추", "classic", 5500),
                 (2, "치킨버거", "크리스피 치킨 패티, 양상추, 마요 소스", "chicken", 6000),
             ])
-            db.executemany("INSERT INTO menu_option VALUES(?,?,?,?)", [
+            db.executemany("INSERT INTO menu_option(id,menu_id,name,extra_price) VALUES(?,?,?,?)", [
                 (1, 1, "치즈 추가", 500), (2, 1, "패티 추가", 1800),
                 (3, 2, "치즈 추가", 500), (4, 2, "매콤 소스 추가", 300),
             ])
 
+        db.executemany("""INSERT OR IGNORE INTO menu(name,description,kind,category,base_price,registration_key)
+                          VALUES(?,?,?,?,?,?)""", [
+            ("감자튀김", "바삭하게 튀긴 감자에 소금을 살짝 더했어요.", "fries", "side", 2000, "starter-fries-v1"),
+            ("콜라", "얼음을 곁들인 시원한 탄산음료", "cola", "drink", 1500, "starter-cola-v1"),
+        ])
+
 
 def menu_list(db, *, all_items=False):
     condition = "" if all_items else "WHERE is_sold_out=0"
-    rows = [dict(row) for row in db.execute(f"SELECT * FROM menu {condition} ORDER BY id")]
+    rows = [dict(row) for row in db.execute(f"SELECT id,name,description,kind,category,photo_key,base_price,is_sold_out,version FROM menu {condition} ORDER BY id")]
     for row in rows:
         row["options"] = [dict(option) for option in db.execute(
-            "SELECT id,name,extra_price FROM menu_option WHERE menu_id=? ORDER BY id", (row["id"],)
+            "SELECT id,name,extra_price FROM menu_option WHERE menu_id=? AND active=1 ORDER BY id", (row["id"],)
         )]
     return rows
 

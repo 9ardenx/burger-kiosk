@@ -29,3 +29,5 @@ async function api(path,body) {
   return data;
 }
 export { api };
+
+export const photoUrl = key => new URL("/api/menu-photos/"+key, API_ORIGIN).href;

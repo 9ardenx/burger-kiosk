@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import orders, payments
+from .menu_admin import save_listing
 from .store import Problem, connection, edit_menu, menu_list
 
 PAGES = Path(__file__).resolve().parents[1] / "docs"
@@ -52,7 +53,8 @@ class Handler(BaseHTTPRequestHandler):
             raise Problem("JSON 요청이 필요합니다.", 415)
         try:
             size = int(self.headers.get("Content-Length", 0))
-            if not 0 < size <= 32000:
+            limit = 285_000 if self.path.startswith("/api/admin/menu") else 32_000
+            if not 0 < size <= limit:
                 raise Problem("요청 크기를 확인해 주세요.", 413)
             data = json.loads(self.rfile.read(size))
         except (ValueError, UnicodeError):
@@ -88,12 +90,17 @@ class Handler(BaseHTTPRequestHandler):
             with connection(server.db_path, write=data is not None) as db:
                 if route == "/api/admin/menu" and data is None:
                     return {"menu": menu_list(db, all_items=True)}
+                if route == "/api/admin/menu" and data is not None:
+                    return {"id": save_listing(db, data)}
                 if route == "/api/admin/orders" and data is None:
                     rows = db.execute("SELECT * FROM orders WHERE number IS NOT NULL ORDER BY number DESC")
                     return {"orders": [orders.order_view(db, row) for row in rows]}
                 match = re.fullmatch(r"/api/admin/menu/(\d+)", route)
                 if match and data is not None:
-                    edit_menu(db, int(match[1]), data)
+                    if "name" in data:
+                        save_listing(db, data, int(match[1]))
+                    else:
+                        edit_menu(db, int(match[1]), data)
                     return {"ok": True}
                 match = re.fullmatch(r"/api/admin/orders/([a-f0-9]{32})", route)
                 if match and data is not None:
@@ -125,6 +132,13 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == "POST" and origin and origin != "http://" + host:
                 raise Problem("같은 주소에서 다시 요청해 주세요.", 403)
             route = urlsplit(self.path).path
+            photo = re.fullmatch(r"/api/menu-photos/([a-f0-9]{64})", route)
+            if photo and self.command == "GET":
+                with connection(self.server.db_path) as db:
+                    row = db.execute("SELECT content FROM menu_photo WHERE key=?", (photo[1],)).fetchone()
+                if row is None:
+                    raise Problem("사진을 찾을 수 없습니다.", 404)
+                return self.send_data(200, row["content"], "image/jpeg")
             if not route.startswith("/api/"):
                 if self.command != "GET":
                     raise Problem("허용하지 않는 요청입니다.", 405)

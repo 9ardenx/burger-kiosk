@@ -28,13 +28,16 @@ async function catalog(db, includeSold=false) {
       db.prepare(`INSERT OR IGNORE INTO menu(id,name,description,kind,base_price) VALUES
         (1,'클래식버거','그릴드 비프 패티, 토마토, 양상추','classic',5500),
         (2,'치킨버거','크리스피 치킨 패티, 양상추, 마요 소스','chicken',6000)`),
+      db.prepare(`INSERT OR IGNORE INTO menu(name,description,kind,category,base_price,registration_key) VALUES
+        ('감자튀김','바삭하게 튀긴 감자에 소금을 살짝 더했어요.','fries','side',2000,'starter-fries-v1'),
+        ('콜라','얼음을 곁들인 시원한 탄산음료','cola','drink',1500,'starter-cola-v1')`),
       db.prepare(`INSERT OR IGNORE INTO menu_option(id,menu_id,name,extra_price) VALUES
         (1,1,'치즈 추가',500),(2,1,'패티 추가',1800),(3,2,'치즈 추가',500),(4,2,'매콤 소스 추가',300)`)
     ]);
   }
   const [menus,options]=await db.batch([
-    db.prepare("SELECT * FROM menu " + (includeSold?"":"WHERE is_sold_out=0 ") + "ORDER BY id"),
-    db.prepare("SELECT * FROM menu_option ORDER BY id")
+    db.prepare("SELECT id,name,description,kind,base_price,is_sold_out,version,category,photo_key FROM menu " + (includeSold?"":"WHERE is_sold_out=0 ") + "ORDER BY id"),
+    db.prepare("SELECT id,menu_id,name,extra_price FROM menu_option WHERE active=1 ORDER BY id")
   ]);
   return menus.results.map(menu=>({...menu, options:options.results.filter(o=>o.menu_id===menu.id)}));
 }
@@ -72,8 +75,10 @@ async function createOrder(db,customer,body) {
     check(Array.isArray(line.options) && line.options.length<=20 &&
           new Set(line.options).size===line.options.length,"옵션을 확인해 주세요.");
     const options=line.options.map(id=>menu.options.find(o=>o.id===id));
-    check(options.every(Boolean),"해당 메뉴의 옵션을 선택해 주세요.");
+    check(options.every(Boolean),"옵션이 변경되었습니다. 장바구니에서 새 구성을 확인해 주세요.",409,"CART_CHANGED");
     const unit=menu.base_price+options.reduce((n,o)=>n+o.extra_price,0);
+    check(line.expected_version==null || line.expected_version===menu.version,
+      `${menu.name} 메뉴 정보가 변경되었습니다. 최신 구성을 확인해 주세요.`,409,"CART_CHANGED");
     check(line.expected_unit===unit,`${menu.name} 가격이 변경되었습니다. 새 금액을 확인해 주세요.`,409,"CART_CHANGED");
     total+=unit*line.quantity;
     return {menu,options,quantity:line.quantity};
@@ -121,6 +126,87 @@ async function attempt(db,customer,id,body) {
   }
   return order;
 }
+function menuDefinition(body) {
+  const label=(value,max,required=true)=>{
+    check(typeof value==="string" && [...value.trim()].length<=max && (!required||value.trim()),"메뉴명·설명·옵션명을 확인해 주세요.");
+    return value.trim();
+  };
+  const price=value=>{
+    check(Number.isInteger(value)&&value>=0&&value<=1_000_000,"가격을 확인해 주세요.");
+    return value;
+  };
+  check(["burger","side","drink"].includes(body.category) && typeof body.is_sold_out==="boolean","분류와 판매 상태를 선택해 주세요.");
+  check(Array.isArray(body.options)&&body.options.length<=20,"옵션은 20개까지 등록할 수 있습니다.");
+  const options=body.options.map(option=>{
+    check(option && typeof option==="object","옵션을 확인해 주세요.");
+    const id=option.id??null;
+    check(id===null || (Number.isInteger(id)&&id>0),"옵션 번호를 확인해 주세요.");
+    return {id,name:label(option.name,40),extra:price(option.extra_price)};
+  });
+  const ids=options.filter(o=>o.id!==null).map(o=>o.id);
+  check(new Set(options.map(o=>o.name)).size===options.length && new Set(ids).size===ids.length,"같은 옵션을 두 번 등록할 수 없습니다.");
+  return {name:label(body.name,50),description:label(body.description??"",140,false),
+    category:body.category,price:price(body.base_price),sold:Number(body.is_sold_out),options};
+}
+async function storePhoto(bucket, photo) {
+  if(photo==null)return null;
+  check(typeof photo==="string" && photo.length<=256_000,"사진이 너무 큽니다.");
+  let bytes;
+  try {bytes=Uint8Array.from(atob(photo),c=>c.charCodeAt(0));} catch { throw new Problem("사진 형식이 올바르지 않습니다."); }
+  check(bytes.length>=5 && bytes.length<=192_000 && bytes[0]===255 && bytes[1]===216 && bytes[2]===255 &&
+    bytes.at(-2)===255 && bytes.at(-1)===217,"JPEG 사진을 다시 선택해 주세요.");
+  check(bucket,"사진 저장소를 사용할 수 없습니다.",503);
+  const buffer=await crypto.subtle.digest("SHA-256",bytes);
+  const key=Array.from(new Uint8Array(buffer),b=>b.toString(16).padStart(2,"0")).join("");
+  await bucket.put("menu/"+key,bytes,{httpMetadata:{contentType:"image/jpeg"}});
+  return key;
+}
+async function saveMenu(db,env,body,id=null) {
+  const entry=menuDefinition(body);
+  const create=id===null;
+  let parent, args, final, existingPhoto=null;
+  const statements=[];
+  if(create) {
+    check(validKey(body.key) && entry.options.every(o=>o.id===null),"등록 정보와 옵션을 확인해 주세요.");
+    const prev=await statement(db,"SELECT id FROM menu WHERE registration_key=?",body.key).first();
+    if(prev)return {id:prev.id};
+    parent="SELECT id FROM menu WHERE registration_key=? AND version=-1";
+    args=[body.key];
+  } else {
+    check(Number.isInteger(body.version)&&body.version>=0,"메뉴 버전을 확인해 주세요.");
+    const old=await statement(db,"SELECT version,photo_key FROM menu WHERE id=?",id).first();
+    check(old && old.version===body.version,"메뉴가 변경되었습니다. 다시 확인해 주세요.",409,"MENU_CHANGED");
+    const allowed=new Set((await all(db,"SELECT id FROM menu_option WHERE menu_id=? AND active=1",id)).map(o=>o.id));
+    check(entry.options.every(o=>o.id===null || allowed.has(o.id)),"해당 메뉴의 옵션만 수정할 수 있습니다.");
+    existingPhoto=old.photo_key;
+    parent="SELECT id FROM menu WHERE id=? AND version=?";
+    args=[id,body.version];
+  }
+  const photo=Object.hasOwn(body,"photo")?await storePhoto(env.BUCKET,body.photo):existingPhoto;
+  if(create) {
+    statements.push(statement(db,`INSERT OR IGNORE INTO menu(name,description,category,kind,base_price,is_sold_out,
+      photo_key,registration_key,version) VALUES(?,?,?,'custom',?,?,?,?,-1)`,
+      entry.name,entry.description,entry.category,entry.price,entry.sold,photo,body.key));
+    final=statement(db,"UPDATE menu SET version=0 WHERE registration_key=? AND version=-1",body.key);
+  } else {
+    statements.push(statement(db,`UPDATE menu_option SET active=0 WHERE menu_id=(${parent}) AND active=1`,...args));
+    final=statement(db,`UPDATE menu SET name=?,description=?,category=?,base_price=?,is_sold_out=?,photo_key=?,
+      version=version+1 WHERE id=? AND version=?`,entry.name,entry.description,entry.category,entry.price,entry.sold,photo,...args);
+  }
+  for(const option of entry.options) {
+    statements.push(option.id===null
+      ? statement(db,`INSERT INTO menu_option(menu_id,name,extra_price) SELECT id,?,? FROM (${parent})`,option.name,option.extra,...args)
+      : statement(db,`UPDATE menu_option SET name=?,extra_price=?,active=1 WHERE id=? AND menu_id=(${parent})`,
+                  option.name,option.extra,option.id,...args));
+  }
+  const results=await db.batch([...statements,final]);
+  if(!create) {
+    check(results.at(-1).meta.changes===1,"메뉴가 변경되었습니다. 다시 확인해 주세요.",409,"MENU_CHANGED");
+    return {id};
+  }
+  return statement(db,"SELECT id FROM menu WHERE registration_key=?",body.key).first();
+}
+
 async function adminRoute(db,env,path,request,body) {
   if(path==="/api/admin/login" && body) {
     const password=body.password;
@@ -142,11 +228,13 @@ async function adminRoute(db,env,path,request,body) {
   if(path==="/api/admin/logout" && body){
     await statement(db,"DELETE FROM admin_session WHERE digest=?",hash).run();return {ok:true};
   }
+  if(path==="/api/admin/menu" && body)return saveMenu(db,env,body);
   if(path==="/api/admin/menu" && !body)return {menu:await catalog(db,true)};
   if(path==="/api/admin/orders" && !body)
     return {orders:(await all(db,orderSelect+" WHERE o.number IS NOT NULL ORDER BY o.number DESC")).map(toView)};
   let match=path.match(/^\/api\/admin\/menu\/(\d+)$/);
   if(match && body){
+    if(Object.hasOwn(body,"name"))return saveMenu(db,env,body,Number(match[1]));
     check(Number.isInteger(body.base_price) && body.base_price>=0 && body.base_price<=1_000_000 &&
       typeof body.is_sold_out==="boolean" && Number.isInteger(body.version),"가격과 판매 상태를 확인해 주세요.");
     const r=await statement(db,"UPDATE menu SET base_price=?,is_sold_out=?,version=version+1 WHERE id=? AND version=?",
@@ -167,9 +255,10 @@ async function dispatch(request,env,path) {
   let body;
   if(request.method==="POST"){
     check(request.headers.get("Content-Type")?.startsWith("application/json"),"JSON 요청이 필요합니다.",415);
-    check(Number(request.headers.get("Content-Length")||0)<=32000,"너무 큰 요청입니다.",413);
+    const limit=path.startsWith("/api/admin/menu")?285_000:32_000;
+    check(Number(request.headers.get("Content-Length")||0)<=limit,"너무 큰 요청입니다.",413);
     const raw=await request.text();
-    check(raw.length<=32000,"너무 큰 요청입니다.",413);
+    check(raw.length<=limit,"너무 큰 요청입니다.",413);
     try {body=JSON.parse(raw);}catch{throw new Problem("입력값을 읽을 수 없습니다.");}
     check(body && typeof body==="object" && !Array.isArray(body),"입력값을 확인해 주세요.");
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
@@ -193,7 +282,17 @@ async function handleKiosk(request,env) {
   if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{...headers,
     "Access-Control-Allow-Methods":"GET,POST,OPTIONS","Access-Control-Allow-Headers":"Content-Type,Authorization,X-Kiosk-Session",
     "Access-Control-Max-Age":"600"}});
-  try{return Response.json(await dispatch(request,env,new URL(request.url).pathname),{headers});}
+  try{
+    const path=new URL(request.url).pathname;
+    const photo=path.match(/^\/api\/menu-photos\/([a-f0-9]{64})$/);
+    if(photo && request.method==="GET"){
+      const stored=await env.BUCKET.get("menu/"+photo[1]);
+      check(stored,"사진을 찾을 수 없습니다.",404);
+      return new Response(stored.body,{headers:{...headers,"Content-Type":"image/jpeg",
+        "Cache-Control":"public, max-age=31536000, immutable","X-Content-Type-Options":"nosniff"}});
+    }
+    return Response.json(await dispatch(request,env,path),{headers});
+  }
   catch(e){
     if(e instanceof Problem)return Response.json({error:e.message,code:e.code},{status:e.status,headers});
     console.error("Kiosk API database request failed",e?.name);

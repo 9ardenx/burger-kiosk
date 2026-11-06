@@ -4,11 +4,12 @@ import { sql } from "drizzle-orm";
 export const menus = sqliteTable("menu", {
   id: integer().primaryKey(), name: text().notNull(), description: text().notNull(),
   kind: text().notNull(), base_price: integer().notNull(), is_sold_out: integer().notNull().default(0),
+  category: text().notNull().default("burger"), photo_key: text(), registration_key: text().unique(),
   version: integer().notNull().default(0)
 });
 export const options = sqliteTable("menu_option", {
   id: integer().primaryKey(), menu_id: integer().notNull().references(() => menus.id),
-  name: text().notNull(), extra_price: integer().notNull()
+  name: text().notNull(), extra_price: integer().notNull(), active: integer().notNull().default(1)
 });
 export const orders = sqliteTable("orders", {
   id: text().primaryKey(), customer: text().notNull(), signature: text().notNull(),
