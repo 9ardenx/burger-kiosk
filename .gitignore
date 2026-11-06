@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+data/
+.env
+.env.*
+!.env.example
+# Supplied coursework stays in the local workspace.
+/*.pdf
+/*.docx
+~$*

@@ -1,0 +1,71 @@
+# 햄버거 프랜차이즈 주문·관리 시스템
+
+소프트웨어공학 3조의 설계에 따라 만든 키오스크와 매장 관리 프로그램입니다. 고객은 판매 가능한 버거와 옵션을 선택해 결제하고, 관리자는 같은 데이터베이스에서 가격·품절 여부와 조리 상태를 관리합니다.
+
+## 로컬 실행
+
+Python 3.10 이상에서 동작합니다. 기본 모드는 Python 표준 라이브러리와 SQLite를 사용하므로 별도로 설치할 패키지가 없습니다.
+
+```powershell
+git clone https://github.com/9ardenx/burger-kiosk.git
+cd burger-kiosk
+python app.py
+```
+
+이미 소스가 있는 경우 그 폴더에서 `python app.py`만 실행하세요. [고객 키오스크](http://127.0.0.1:8000/)와 [관리자 화면](http://127.0.0.1:8000/admin)을 서로 다른 탭에서 열 수 있습니다. 관리자 로그인 암호는 첫 실행 때 생성되는 `data/admin-code.txt`에서 확인합니다. 종료는 실행한 터미널에서 Ctrl+C를 누릅니다.
+
+Windows에서 `python` 명령을 찾지 못하면 `py -3 app.py`를 사용하세요. 포트를 바꾸려면 `python app.py --port 8010`을 실행합니다. 개인 PC에서 시연할 수 있도록 루프백 주소에 바인딩합니다.
+
+## 3분 시연
+
+1. 키오스크에서 **클래식버거**와 **치즈 추가**를 선택해 담습니다. 장바구니에서 수량을 2개로 바꾸면 합계가 12,000원입니다.
+2. **주문 확인**에서 모의 승인 결과를 **승인 거절**로 선택하고 결제합니다. 실패 화면에서 **승인 성공 → 다시 결제**를 누르면 같은 주문에 새 결제 시도가 기록되고 주문번호가 발급됩니다.
+3. 관리자 **주문 현황**에서 새로고침하고 주문번호를 눌러 옵션을 확인합니다. **조리 시작 → 준비 완료 → 수령 완료** 순서로 처리합니다. 완료된 주문은 **수령 완료** 필터에서 확인합니다.
+4. 가격 변경을 시험하려면 고객 장바구니에 먼저 담고 관리자 **메뉴 관리**에서 가격을 바꿉니다. 결제 직전 변경된 가격을 안내합니다. 같은 방법으로 품절을 설정하면 결제가 차단됩니다. 이미 결제가 끝난 주문은 당시 단가를 유지합니다.
+
+## 결제 모드
+
+기본값 `demo`는 외부 통신 없이 모의 카드 승인과 거절을 재현합니다. 주문·결제 기록은 두 모드 모두 SQLite에 저장됩니다. 실제 PG 테스트 결제창을 사용하려면 토스페이먼츠 개발자센터에서 발급한 **API 개별 연동 테스트 키**를 같은 PowerShell 창에 설정한 뒤 시작합니다.
+
+```powershell
+$env:PAYMENT_MODE = "toss"
+$env:TOSS_CLIENT_KEY = "<본인의 test_ck_ 키>"
+$env:TOSS_SECRET_KEY = "<본인의 test_sk_ 키>"
+python app.py
+```
+
+브라우저는 카드 결제창에서 인증하고, 서버는 저장된 주문 금액을 확인한 뒤 승인을 요청합니다. 중복 요청에는 같은 결제 시도 식별자를 사용합니다. 통신이 끊기면 **결과 다시 확인**으로 기존 거래를 확인할 수 있습니다. 기본 모드로 돌아가려면 `$env:PAYMENT_MODE = "demo"`로 바꾸고 서버를 재시작합니다. [결제창 연동 가이드](https://docs.tosspayments.com/guides/v2/payment-window/integration) · [승인 및 조회 API](https://docs.tosspayments.com/reference)
+
+## 구조와 데이터
+
+| 파일 | 담당 기능 |
+| --- | --- |
+| `app.py` | 서버 실행, DB 초기화, 관리자 암호 설정 |
+| `kiosk/static/` | 고객·관리자 화면, 메뉴 그림, 장바구니 세션 |
+| `kiosk/http.py` | 화면 및 API 라우팅, 관리자 세션 |
+| `kiosk/orders.py` | 금액 재검증, 주문 시점의 단가·옵션 보존, 주문 상태 전이 |
+| `kiosk/payments.py` | 결제 시도 이력, 모의 승인, 테스트 PG 연동과 결과 대조 |
+| `kiosk/store.py`, `kiosk/schema.sql` | 메뉴·옵션·주문·주문 항목·선택 옵션·결제 저장 |
+
+주문 상태는 `PENDING_PAYMENT → PAID → PREPARING → READY → COMPLETED`입니다. 결제 거절은 해당 시도만 `FAILED`로 기록하고 주문은 결제대기에 둡니다. 관리자 화면은 결제완료부터 주문을 표시합니다.
+
+데이터베이스는 기본적으로 `data/kiosk.sqlite3`에 생성됩니다. 별도의 시연 데이터를 사용하려면 `python app.py --data-dir 다른폴더`로 실행하세요. 관리자 암호를 지정하려면 시작 전에 `KIOSK_ADMIN_PASSWORD` 환경 변수를 설정합니다.
+
+## 테스트
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+테스트는 임시 DB에서 동시 결제, 재시도, 주문번호 중복 방지, 금액 보존, 품절 및 조리 상태 변경을 검증합니다. PG 응답의 불확실성과 승인 조회 재개는 테스트 대역으로 점검합니다. 외부 PG 결제창은 별도의 테스트 키와 네트워크 연결이 필요합니다.
+
+## GitHub에 변경 사항 반영
+
+```powershell
+git status
+git add app.py kiosk tests README.md .gitignore
+git commit -m "Update kiosk"
+git push
+```
+
+기본 데이터 폴더, 인증 설정 파일, 프로젝트 루트의 과제 원본과 강의 자료는 Git 제외 목록에 있습니다. 소스를 GitHub에 푸시한 뒤에도 키오스크를 이용할 PC에서는 Python 서버를 실행해야 합니다.
