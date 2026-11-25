@@ -49,6 +49,7 @@ def initialize(path):
         for table, additions in (
             ("menu", {"category": "TEXT NOT NULL DEFAULT 'burger'", "photo_key": "TEXT", "registration_key": "TEXT", "choice_groups": "TEXT NOT NULL DEFAULT '[]'"}),
             ("order_item", {"choice_snapshot": "TEXT NOT NULL DEFAULT '[]'"}),
+            ("orders", {"cancelled_at": "TEXT"}),
             ("menu_option", {"active": "INTEGER NOT NULL DEFAULT 1"}),
         ):
             columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -103,7 +104,26 @@ def menu_list(db, *, all_items=False):
         row["options"] = [dict(option) for option in db.execute(
             "SELECT id,name,extra_price FROM menu_option WHERE menu_id=? AND active=1 ORDER BY id", (row["id"],)
         )]
-    return rows
+    positions = {mid: i for i, mid in enumerate(menu_order_state(db)["ids"])}
+    return sorted(rows, key=lambda row: (positions.get(row["id"], len(positions)), row["id"]))
+
+
+def menu_order_state(db):
+    row = db.execute("SELECT menu_ids,revision FROM menu_display_order WHERE id=1").fetchone()
+    return {"ids": json.loads(row["menu_ids"]) if row else [], "revision": row["revision"] if row else 0}
+
+
+def reorder_menu(db, data):
+    ids = data.get("ids")
+    revision = integer(data.get("revision"), 0, 2**31-1, "메뉴 순서 버전")
+    if not isinstance(ids, list) or not ids or any(type(mid) is not int for mid in ids) or len(set(ids)) != len(ids):
+        raise Problem("메뉴 순서를 확인해 주세요.")
+    actual = {row[0] for row in db.execute("SELECT id FROM menu")}
+    if set(ids) != actual or menu_order_state(db)["revision"] != revision:
+        raise Problem("메뉴 목록 또는 순서가 변경되었습니다. 최신 목록에서 다시 정렬해 주세요.", 409, "MENU_ORDER_CHANGED")
+    db.execute("INSERT OR IGNORE INTO menu_display_order(id) VALUES(1)")
+    db.execute("UPDATE menu_display_order SET menu_ids=?,revision=revision+1 WHERE id=1", (json.dumps(ids),))
+    return {"revision": revision + 1}
 
 
 def edit_menu(db, menu_id, data):

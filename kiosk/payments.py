@@ -71,6 +71,8 @@ def finish(db, attempt, outcome, method=None):
 
 def begin(db, gateway, order_id, customer, data):
     row = owner_order(db, order_id, customer)
+    if row["cancelled_at"]:
+        raise Problem("취소한 주문입니다. 메뉴를 다시 선택해 주세요.", 409, "ORDER_CANCELLED")
     key = identifier(data.get("key"))
     exists = db.execute("SELECT 1 FROM payment WHERE order_id=? AND (request_key=? OR status='PENDING')",
                         (order_id, key)).fetchone()

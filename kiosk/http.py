@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from . import orders, payments
 from .menu_admin import save_listing
-from .store import Problem, connection, edit_menu, menu_list
+from .store import Problem, connection, edit_menu, menu_list, menu_order_state, reorder_menu
 
 PAGES = Path(__file__).resolve().parents[1] / "docs"
 ASSETS = PAGES / "assets"
@@ -89,7 +89,9 @@ class Handler(BaseHTTPRequestHandler):
                 return {"ok": True}
             with connection(server.db_path, write=data is not None) as db:
                 if route == "/api/admin/menu" and data is None:
-                    return {"menu": menu_list(db, all_items=True)}
+                    return {"menu": menu_list(db, all_items=True), "order_revision": menu_order_state(db)["revision"]}
+                if route == "/api/admin/menu-order" and data is not None:
+                    return reorder_menu(db, data)
                 if route == "/api/admin/menu" and data is not None:
                     return {"id": save_listing(db, data)}
                 if route == "/api/admin/orders" and data is None:
@@ -105,16 +107,18 @@ class Handler(BaseHTTPRequestHandler):
                 match = re.fullmatch(r"/api/admin/orders/([a-f0-9]{32})", route)
                 if match and data is not None:
                     orders.advance(db, match[1], data.get("expected"))
-                    return {"ok": True}
+                    return {"order": orders.order_view(db, db.execute("SELECT * FROM orders WHERE id=?", (match[1],)).fetchone())}
         if route == "/api/orders" and data is not None:
             with connection(server.db_path, write=True) as db:
                 return orders.create_order(db, self.customer, data)
-        match = re.fullmatch(r"/api/orders/([a-f0-9]{32})(/attempts)?", route)
+        match = re.fullmatch(r"/api/orders/([a-f0-9]{32})(/attempts|/cancel)?", route)
         if match:
             with connection(server.db_path, write=data is not None) as db:
                 if not match[2] and data is None:
                     return orders.order_view(db, orders.owner_order(db, match[1], self.customer))
-                if match[2] and data is not None:
+                if match[2] == "/cancel" and data is not None:
+                    return orders.cancel_unpaid(db, match[1], self.customer)
+                if match[2] == "/attempts" and data is not None:
                     return payments.begin(db, server.gateway, match[1], self.customer, data)
         match = re.fullmatch(r"/api/payments/([a-f0-9]{32})", route)
         if match and data is not None:

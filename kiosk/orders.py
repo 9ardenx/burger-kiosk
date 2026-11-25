@@ -27,7 +27,7 @@ def order_view(db, row):
         "SELECT id,status,mode,pg_tid IS NOT NULL AS has_key FROM payment WHERE order_id=? ORDER BY rowid DESC LIMIT 1",
         (row["id"],),
     ).fetchone()
-    return {"id": row["id"], "number": row["number"], "status": row["status"], "total": row["total_amount"],
+    return {"id": row["id"], "number": row["number"], "status": "CANCELLED" if row["cancelled_at"] else row["status"], "total": row["total_amount"],
             "created_at": row["created_at"], "items": items, "payment": dict(payment) if payment else None}
 
 
@@ -89,7 +89,18 @@ def create_order(db, customer, data):
 def advance(db, order_id, expected):
     if not isinstance(expected, str) or expected not in NEXT_STATE:
         raise Problem("다음 단계로 변경할 수 없는 주문입니다.", 409)
-    result = db.execute("UPDATE orders SET status=? WHERE id=? AND status=?",
+    result = db.execute("UPDATE orders SET status=? WHERE id=? AND status=? AND cancelled_at IS NULL",
                         (NEXT_STATE[expected], order_id, expected))
     if result.rowcount != 1:
         raise Problem("주문 상태가 변경되었습니다. 최신 상태를 확인해 주세요.", 409, "ORDER_CHANGED")
+
+
+def cancel_unpaid(db, order_id, customer):
+    row = owner_order(db, order_id, customer)
+    if row["cancelled_at"]:
+        return order_view(db, row)
+    pending = db.execute("SELECT 1 FROM payment WHERE order_id=? AND status IN ('PENDING','SUCCESS')", (order_id,)).fetchone()
+    if row["status"] != "PENDING_PAYMENT" or pending:
+        raise Problem("결제가 진행 중이거나 완료된 주문입니다. 결제 결과를 먼저 확인해 주세요.", 409, "PAYMENT_IN_PROGRESS")
+    db.execute("UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP WHERE id=?", (order_id,))
+    return order_view(db, owner_order(db, order_id, customer))

@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS menu_option (
 CREATE TABLE IF NOT EXISTS orders (
     id TEXT PRIMARY KEY, customer TEXT NOT NULL, request_key TEXT NOT NULL,
     cart_signature TEXT NOT NULL, total_amount INTEGER NOT NULL,
-    number INTEGER UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    number INTEGER UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, cancelled_at TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING_PAYMENT'
         CHECK(status IN ('PENDING_PAYMENT','PAID','PREPARING','READY','COMPLETED')),
     UNIQUE(customer, request_key)
@@ -41,3 +41,8 @@ CREATE INDEX IF NOT EXISTS options_by_item ON order_item_option(order_item_id);
 CREATE INDEX IF NOT EXISTS payments_by_order ON payment(order_id);
 
 CREATE TABLE IF NOT EXISTS menu_photo (key TEXT PRIMARY KEY, content BLOB NOT NULL);
+
+CREATE TABLE IF NOT EXISTS menu_display_order (
+    id INTEGER PRIMARY KEY CHECK(id=1), menu_ids TEXT NOT NULL DEFAULT '[]',
+    revision INTEGER NOT NULL DEFAULT 0
+);

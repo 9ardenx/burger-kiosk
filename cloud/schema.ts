@@ -15,7 +15,7 @@ export const options = sqliteTable("menu_option", {
 export const orders = sqliteTable("orders", {
   id: text().primaryKey(), customer: text().notNull(), signature: text().notNull(),
   total: integer().notNull(), status: text().notNull().default("PENDING_PAYMENT"),
-  number: integer().unique(), created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`),
+  number: integer().unique(), created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`), cancelled_at: text(),
   creation_tag: text().notNull()
 });
 export const items = sqliteTable("order_item", {
@@ -36,4 +36,9 @@ export const payments = sqliteTable("payment", {
 }, t => [index("payments_by_order").on(t.order_id), uniqueIndex("one_success").on(t.order_id).where(sql`status = 'SUCCESS'`)]);
 export const sessions = sqliteTable("admin_session", {
   digest: text().primaryKey(), expires: integer().notNull()
+});
+
+export const menuDisplayOrder = sqliteTable("menu_display_order", {
+  id: integer().primaryKey(), menu_ids: text().notNull().default("[]"),
+  revision: integer().notNull().default(0)
 });

@@ -42,14 +42,17 @@ async function catalog(db, includeSold=false) {
         JSON.stringify(sodaGroups.map(g=>({...g,when_extra:'탄산음료 감자튀김'}))))
     ]);
   }
-  const [menus,options]=await db.batch([
+  const [menus,options,displayOrder]=await db.batch([
     db.prepare("SELECT id,name,description,kind,base_price,is_sold_out,version,category,photo_key,choice_groups FROM menu " + (includeSold?"":"WHERE is_sold_out=0 ") + "ORDER BY id"),
-    db.prepare("SELECT id,menu_id,name,extra_price FROM menu_option WHERE active=1 ORDER BY id")
+    db.prepare("SELECT id,menu_id,name,extra_price FROM menu_option WHERE active=1 ORDER BY id"),
+    db.prepare("SELECT menu_ids,revision FROM menu_display_order WHERE id=1")
   ]);
-  return menus.results.map(menu=>({...menu, choice_groups:JSON.parse(menu.choice_groups), options:options.results.filter(o=>o.menu_id===menu.id)}));
+  const positions=new Map(JSON.parse(displayOrder.results[0]?.menu_ids??"[]").map((id,i)=>[id,i]));
+  return menus.results.map(menu=>({...menu, choice_groups:JSON.parse(menu.choice_groups), options:options.results.filter(o=>o.menu_id===menu.id)}))
+    .sort((a,b)=>(positions.get(a.id)??positions.size)-(positions.get(b.id)??positions.size)||a.id-b.id);
 }
 
-const orderSelect = `SELECT o.id,o.number,o.status,o.total,o.created_at,
+const orderSelect = `SELECT o.id,o.number,CASE WHEN o.cancelled_at IS NOT NULL THEN 'CANCELLED' ELSE o.status END AS status,o.total,o.created_at,
   (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,'variants',json(i.choice_snapshot),
     'options',json((SELECT json_group_array(json_object('name',x.name,'option_price',x.option_price))
       FROM order_item_option x WHERE x.item_id=i.id)))) FROM order_item i WHERE i.order_id=o.id) AS items,
@@ -121,19 +124,44 @@ async function attempt(db,customer,id,body) {
   // The approval and the visible pickup number are committed together.
   const changes=await db.batch([
     statement(db,`INSERT OR IGNORE INTO payment(id,order_id,amount,status)
-      SELECT ?,o.id,o.total,? FROM orders o WHERE o.id=? AND o.customer=? AND o.status='PENDING_PAYMENT'
+      SELECT ?,o.id,o.total,? FROM orders o WHERE o.id=? AND o.customer=? AND o.status='PENDING_PAYMENT' AND o.cancelled_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM order_item i JOIN menu m ON m.id=i.menu_id WHERE i.order_id=o.id AND m.is_sold_out=1)`,
       ticket,outcome,id,customer),
     statement(db,`UPDATE orders SET status='PAID',number=(SELECT coalesce(max(number),0)+1 FROM orders)
-      WHERE id=? AND customer=? AND status='PENDING_PAYMENT'
+      WHERE id=? AND customer=? AND status='PENDING_PAYMENT' AND cancelled_at IS NULL
       AND EXISTS(SELECT 1 FROM payment WHERE order_id=? AND status='SUCCESS')`,id,customer,id)
   ]);
   const order=await readOrder(db,id,customer);
+  check(order.status!=="CANCELLED","취소한 주문입니다. 메뉴를 다시 선택해 주세요.",409,"ORDER_CANCELLED");
   if(!changes[0].meta.changes && order.number===null) {
     const repeated=await statement(db,"SELECT id FROM payment WHERE id=?",ticket).first();
     check(repeated,"주문할 수 없는 품절 메뉴가 있습니다. 장바구니를 수정해 주세요.",409,"CART_CHANGED");
   }
   return order;
+}
+
+async function cancelUnpaid(db,customer,id) {
+  await statement(db,`UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP WHERE id=? AND customer=?
+    AND status='PENDING_PAYMENT' AND cancelled_at IS NULL
+    AND NOT EXISTS(SELECT 1 FROM payment WHERE order_id=? AND status IN ('PENDING','SUCCESS'))`,id,customer,id).run();
+  const order=await readOrder(db,id,customer);
+  check(order.status==="CANCELLED","결제가 진행 중이거나 완료된 주문입니다. 결제 결과를 먼저 확인해 주세요.",409,"PAYMENT_IN_PROGRESS");
+  return order;
+}
+
+async function reorderMenu(db,body) {
+  const ids=body.ids;
+  check(Array.isArray(ids)&&ids.length>0&&ids.every(id=>Number.isInteger(id)&&id>0)&&new Set(ids).size===ids.length&&
+    Number.isInteger(body.revision)&&body.revision>=0,"메뉴 순서를 확인해 주세요.");
+  const encoded=JSON.stringify(ids);
+  const results=await db.batch([
+    db.prepare("INSERT OR IGNORE INTO menu_display_order(id) VALUES(1)"),
+    statement(db,`UPDATE menu_display_order SET menu_ids=?,revision=revision+1 WHERE id=1 AND revision=?
+      AND (SELECT count(*) FROM menu)=? AND NOT EXISTS(SELECT id FROM menu WHERE id NOT IN (SELECT value FROM json_each(?)))`,
+      encoded,body.revision,ids.length,encoded)
+  ]);
+  check(results[1].meta.changes===1,"메뉴 목록 또는 순서가 변경되었습니다. 최신 목록에서 다시 정렬해 주세요.",409,"MENU_ORDER_CHANGED");
+  return {revision:body.revision+1};
 }
 function menuDefinition(body) {
   const label=(value,max,required=true)=>{
@@ -245,7 +273,12 @@ async function adminRoute(db,env,path,request,body) {
     await statement(db,"DELETE FROM admin_session WHERE digest=?",hash).run();return {ok:true};
   }
   if(path==="/api/admin/menu" && body)return saveMenu(db,env,body);
-  if(path==="/api/admin/menu" && !body)return {menu:await catalog(db,true)};
+  if(path==="/api/admin/menu-order" && body)return reorderMenu(db,body);
+  if(path==="/api/admin/menu" && !body){
+    // A revision read before the catalog makes a concurrent reorder a safe conflict.
+    const sequence=await db.prepare("SELECT revision FROM menu_display_order WHERE id=1").first();
+    return {menu:await catalog(db,true),order_revision:sequence?.revision??0};
+  }
   if(path==="/api/admin/orders" && !body)
     return {orders:(await all(db,orderSelect+" WHERE o.number IS NOT NULL ORDER BY o.number DESC")).map(toView)};
   let match=path.match(/^\/api\/admin\/menu\/(\d+)$/);
@@ -260,8 +293,9 @@ async function adminRoute(db,env,path,request,body) {
   match=path.match(/^\/api\/admin\/orders\/([a-f0-9]{32})$/);
   if(match && body){
     check(Object.hasOwn(NEXT,body.expected),"변경할 수 없는 주문 상태입니다.",409);
-    const r=await statement(db,"UPDATE orders SET status=? WHERE id=? AND status=?",NEXT[body.expected],match[1],body.expected).run();
-    check(r.meta.changes===1,"주문 상태가 변경되었습니다.",409,"ORDER_CHANGED");return {ok:true};
+    const r=await statement(db,"UPDATE orders SET status=? WHERE id=? AND status=? AND cancelled_at IS NULL",NEXT[body.expected],match[1],body.expected).run();
+    check(r.meta.changes===1,"주문 상태가 변경되었습니다.",409,"ORDER_CHANGED");
+    return {order:toView(await statement(db,orderSelect+" WHERE o.id=?",match[1]).first())};
   }
   throw new Problem("경로를 찾을 수 없습니다.",404);
 }
@@ -284,8 +318,9 @@ async function dispatch(request,env,path) {
   check(validKey(token),"고객 세션을 확인해 주세요.",401);
   const customer=await digest(token);
   if(path==="/api/orders" && body)return createOrder(db,customer,body);
-  const m=path.match(/^\/api\/orders\/([a-f0-9]{32})(\/attempts)?$/);
-  if(m && m[2] && body)return attempt(db,customer,m[1],body);
+  const m=path.match(/^\/api\/orders\/([a-f0-9]{32})(\/attempts|\/cancel)?$/);
+  if(m && m[2]==="/cancel" && body)return cancelUnpaid(db,customer,m[1]);
+  if(m && m[2]==="/attempts" && body)return attempt(db,customer,m[1],body);
   if(m && !m[2] && !body)return readOrder(db,m[1],customer);
   throw new Problem("경로를 찾을 수 없습니다.",404);
 }
