@@ -3,6 +3,7 @@ import sodaGroups from "./drink-example.json" with {type:"json"};
 import {Problem,check} from './problems.mjs';
 import {categoryState,saveCategories,DEFAULT_CATEGORY_JSON,CATEGORY_EXISTS} from './categories.mjs';
 import {loginAdmin,requireAdmin,securityInfo,changePassword,issueRecovery,resetPassword} from './admin-auth.mjs';
+import {adState,saveAds} from './advertising.mjs';
 
 const FRONTEND = "https://9ardenx.github.io";
 const NEXT = Object.freeze({PAID:"PREPARING", PREPARING:"READY", READY:"COMPLETED"});
@@ -46,7 +47,7 @@ async function catalog(db, includeSold=false) {
 }
 
 const orderSelect = `SELECT o.id,o.number,CASE WHEN o.cancelled_at IS NOT NULL THEN 'CANCELLED' ELSE o.status END AS status,o.total,o.created_at,
-  o.cancelled_at,o.cancelled_by,o.cancel_reason,
+  o.cancelled_at,o.cancelled_by,o.cancel_reason,o.dining_type,
   (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,'variants',json(i.choice_snapshot),
     'options',json((SELECT json_group_array(json_object('name',x.name,'option_price',x.option_price))
       FROM order_item_option x WHERE x.item_id=i.id)))) FROM order_item i WHERE i.order_id=o.id) AS items,
@@ -61,13 +62,15 @@ async function readOrder(db,id,customer) {
   return toView(row);
 }
 async function createOrder(db,customer,body) {
+  const diningType=body.dining_type??null;
+  check([null,'DINE_IN','TAKEOUT'].includes(diningType),'매장 또는 포장을 선택해 주세요.');
   const cart=body.items;
   check(validKey(body.key) && Array.isArray(cart) && cart.length>=1 && cart.length<=50,"장바구니 구성을 확인해 주세요.");
   const id=(await digest(customer+"/"+body.key)).slice(0,32);
   const signature=await digest(JSON.stringify(cart));
-  const previous=await statement(db,"SELECT signature FROM orders WHERE id=?",id).first();
+  const previous=await statement(db,"SELECT signature,dining_type FROM orders WHERE id=?",id).first();
   if(previous){
-    check(previous.signature===signature,"이미 사용된 주문 요청입니다.",409);
+    check(previous.signature===signature&&previous.dining_type===diningType,"이미 사용된 주문 요청입니다.",409);
     return readOrder(db,id,customer);
   }
   const menus=await catalog(db,true);
@@ -92,9 +95,9 @@ async function createOrder(db,customer,body) {
   const tag=crypto.randomUUID();
   const menuVersions=[...new Map(lines.map(l=>[l.menu.id,l.menu.version]))];
   const versionChecks=menuVersions.map(()=>"(id=? AND version=?)").join(" OR ");
-  const commands=[statement(db,`INSERT OR IGNORE INTO orders(id,customer,signature,total,creation_tag)
-    SELECT ?,?,?,?,? WHERE (SELECT count(*) FROM menu WHERE is_sold_out=0 AND (${versionChecks}))=?`,
-    id,customer,signature,total,tag,...menuVersions.flat(),menuVersions.length)];
+  const commands=[statement(db,`INSERT OR IGNORE INTO orders(id,customer,signature,total,creation_tag,dining_type)
+    SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM menu WHERE is_sold_out=0 AND (${versionChecks}))=?`,
+    id,customer,signature,total,tag,diningType,...menuVersions.flat(),menuVersions.length)];
   // A retried or concurrent request can write items only if it created this order.
   const created="EXISTS(SELECT 1 FROM orders WHERE id=? AND creation_tag=?)";
   for(const line of lines){
@@ -105,9 +108,9 @@ async function createOrder(db,customer,body) {
       SELECT ?,?,?,?,? WHERE ${created}`,crypto.randomUUID(),itemId,opt.id,opt.name,opt.extra_price,id,tag));
   }
   await db.batch(commands);
-  const stored=await statement(db,"SELECT signature FROM orders WHERE id=?",id).first();
+  const stored=await statement(db,"SELECT signature,dining_type FROM orders WHERE id=?",id).first();
   check(stored,"판매 정보가 변경되었습니다. 장바구니를 확인해 주세요.",409,"CART_CHANGED");
-  check(stored.signature===signature,"이미 사용된 주문 요청입니다.",409);
+  check(stored.signature===signature&&stored.dining_type===diningType,"이미 사용된 주문 요청입니다.",409);
   return readOrder(db,id,customer);
 }
 
@@ -268,6 +271,7 @@ async function adminRoute(db,env,path,request,body) {
   if(path==='/api/admin/login'&&body)return loginAdmin(db,env,request,body);
   if(path==='/api/admin/reset-password'&&body)return resetPassword(db,request,body);
   const hash=await requireAdmin(db,request);
+  if(path==='/api/admin/ads')return body?saveAds(db,env.BUCKET,body):adState(db);
   if(path==='/api/admin/security'&&!body)return securityInfo(db);
   if(path==='/api/admin/password'&&body)return changePassword(db,env,request,body);
   if(path==='/api/admin/recovery-code'&&body)return issueRecovery(db,env,request,body);
@@ -310,7 +314,7 @@ async function dispatch(request,env,path) {
   let body;
   if(request.method==="POST"){
     check(request.headers.get("Content-Type")?.startsWith("application/json"),"JSON 요청이 필요합니다.",415);
-    const limit=path.startsWith("/api/admin/menu")?285_000:32_000;
+    const limit=path.startsWith("/api/admin/menu")||path==='/api/admin/ads'?285_000:32_000;
     check(Number(request.headers.get("Content-Length")||0)<=limit,"너무 큰 요청입니다.",413);
     const raw=await request.text();
     check(raw.length<=limit,"너무 큰 요청입니다.",413);
@@ -318,6 +322,7 @@ async function dispatch(request,env,path) {
     check(body && typeof body==="object" && !Array.isArray(body),"입력값을 확인해 주세요.");
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
+  if(path==='/api/ads'&&!body)return adState(db,true);
   if(path==="/api/menu" && !body)return {menu:await catalog(db,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:""};
   const token=request.headers.get("X-Kiosk-Session");
   check(validKey(token),"고객 세션을 확인해 주세요.",401);
@@ -340,9 +345,9 @@ async function handleKiosk(request,env) {
     "Access-Control-Max-Age":"600"}});
   try{
     const path=new URL(request.url).pathname;
-    const photo=path.match(/^\/api\/menu-photos\/([a-f0-9]{64})$/);
+    const photo=path.match(/^\/api\/(menu|ad)-photos\/([a-f0-9]{64})$/);
     if(photo && request.method==="GET"){
-      const stored=await env.BUCKET.get("menu/"+photo[1]);
+      const stored=await env.BUCKET.get((photo[1]==='ad'?'ads/':'menu/')+photo[2]);
       check(stored,"사진을 찾을 수 없습니다.",404);
       return new Response(stored.body,{headers:{...headers,"Content-Type":"image/jpeg",
         "Cache-Control":"public, max-age=31536000, immutable","X-Content-Type-Options":"nosniff"}});

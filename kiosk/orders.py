@@ -29,7 +29,7 @@ def order_view(db, row):
     ).fetchone()
     return {"id": row["id"], "number": row["number"], "status": "CANCELLED" if row["cancelled_at"] else row["status"], "total": row["total_amount"],
             "created_at": row["created_at"], "cancelled_at": row["cancelled_at"],
-            "cancelled_by": row["cancelled_by"], "cancel_reason": row["cancel_reason"],
+            "cancelled_by": row["cancelled_by"], "cancel_reason": row["cancel_reason"], "dining_type": row['dining_type'],
             "items": items, "payment": dict(payment) if payment else None}
 
 
@@ -63,6 +63,9 @@ def quote_item(db, line):
 
 
 def create_order(db, customer, data):
+    dining_type = data.get('dining_type')
+    if dining_type not in (None, 'DINE_IN', 'TAKEOUT'):
+        raise Problem('매장 또는 포장을 선택해 주세요.')
     key = identifier(data.get("key"))
     cart = data.get("items")
     if not isinstance(cart, list) or not 1 <= len(cart) <= 50:
@@ -70,14 +73,14 @@ def create_order(db, customer, data):
     signature = hashlib.sha256(json.dumps(cart, sort_keys=True).encode()).hexdigest()
     previous = db.execute("SELECT * FROM orders WHERE customer=? AND request_key=?", (customer, key)).fetchone()
     if previous:
-        if previous["cart_signature"] != signature:
+        if previous["cart_signature"] != signature or previous['dining_type'] != dining_type:
             raise Problem("장바구니가 바뀌었습니다. 주문을 다시 확인해 주세요.", 409)
         return order_view(db, previous)
     lines = [quote_item(db, line) for line in cart]
     total = sum(quantity * unit for _, _, _, quantity, unit in lines)
     order_id = uuid4().hex
-    db.execute("INSERT INTO orders(id,customer,request_key,cart_signature,total_amount) VALUES(?,?,?,?,?)",
-               (order_id, customer, key, signature, total))
+    db.execute("INSERT INTO orders(id,customer,request_key,cart_signature,total_amount,dining_type) VALUES(?,?,?,?,?,?)",
+               (order_id, customer, key, signature, total, dining_type))
     for item, options, snapshot, quantity, _ in lines:
         result = db.execute(
             "INSERT INTO order_item(order_id,menu_id,name,item_price,quantity,choice_snapshot) VALUES(?,?,?,?,?,?)",

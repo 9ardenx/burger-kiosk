@@ -8,7 +8,7 @@ import {handleKiosk} from '../cloud/api.mjs';
 // Exercise the real Worker routes and SQL with an in-memory SQLite D1 adapter.
 async function setup(t) {
   const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
-  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql'])
+  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql'])
     sqlite.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
   const DB={prepare(sql){
     const make=args=>({sql,bind:(...values)=>make(values),
@@ -19,7 +19,8 @@ async function setup(t) {
         {meta:{changes:Number(sqlite.prepare(sql).run(...args).changes)}};}
     });return make([]);
   },async batch(commands){sqlite.exec('BEGIN');try{const result=commands.map(c=>c.execute());sqlite.exec('COMMIT');return result;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
-  const password='isolated-test-password', env={DB,KIOSK_ADMIN_HASH:createHash('sha256').update(password).digest('hex')};
+  const images=new Map(),BUCKET={async put(key,bytes){images.set(key,new Uint8Array(bytes));},async get(key){return images.has(key)?{body:images.get(key)}:null;}};
+  const password='isolated-test-password', env={DB,BUCKET,KIOSK_ADMIN_HASH:createHash('sha256').update(password).digest('hex')};
   let bearer='';
   async function call(path,body,customer='test-customer-session-0001',admin=true){
     const headers={'X-Kiosk-Session':customer};
@@ -32,8 +33,51 @@ async function setup(t) {
   const menu=(await call('/api/menu')).data.menu;
   async function create(){const item=menu[0];const result=await call('/api/orders',{key:randomUUID(),items:[{menu_id:item.id,quantity:1,options:[],expected_unit:item.base_price,expected_version:item.version}]});assert.equal(result.status,200);return result.data;}
   const pay=(id,result='success')=>call(`/api/orders/${id}/attempts`,{key:randomUUID(),demo_result:result});
-  return {sqlite,call,menu,create,pay,setBearer:value=>bearer=value,getBearer:()=>bearer,password};
+  return {sqlite,call,menu,create,pay,env,setBearer:value=>bearer=value,getBearer:()=>bearer,password};
 }
+
+test('v1.5 advertisements create, edit, hide, reorder and delete without touching menus or orders',async t=>{
+  const {call,create,env}=await setup(t),before=(await call('/api/admin/menu')).data,order=await create();
+  const photo=readFileSync(new URL('../assets/menu/published/classic-burger.jpg',import.meta.url)).toString('base64');
+  const item={id:randomUUID(),title:'신제품 <안내>',description:'소개 문구',enabled:true,photo};
+  const saved=await call('/api/admin/ads',{items:[item],revision:0});assert.equal(saved.status,200);assert.equal('photo' in saved.data.items[0],false);
+  const key=saved.data.items[0].photo_key;
+  const image=await handleKiosk(new Request('https://test.invalid/api/ad-photos/'+key),env);assert.equal(image.status,200);assert.equal(Buffer.from(await image.arrayBuffer()).toString('base64'),photo);
+  const second={...item,id:randomUUID(),title:'두 번째'};
+  const two=(await call('/api/admin/ads',{items:[second,{...saved.data.items[0],title:'수정',enabled:false}],revision:1})).data;
+  assert.deepEqual((await call('/api/ads')).data.items.map(a=>a.id),[second.id]);
+  const reversed=await call('/api/admin/ads',{items:two.items.toReversed(),revision:2});assert.equal(reversed.status,200);
+  assert.equal(reversed.data.items[0].photo_key,key);
+  assert.equal((await call('/api/admin/ads',{items:[],revision:3})).status,200);assert.deepEqual((await call('/api/ads')).data.items,[]);
+  assert.deepEqual((await call('/api/admin/menu')).data,before);assert.deepEqual((await call('/api/orders/'+order.id)).data,order);
+});
+test('v1.5 ads reject unauthenticated, stale and malformed requests; concurrent edits have one winner',async t=>{
+  const {call}=await setup(t);
+  assert.equal((await call('/api/admin/ads',{items:[],revision:0},undefined,false)).status,401);
+  assert.equal((await call('/api/admin/ads',{items:[{id:randomUUID(),title:'a',description:'',enabled:true,photo:'not-an-image'}],revision:0})).status,400);
+  const results=await Promise.all([call('/api/admin/ads',{items:[],revision:0}),call('/api/admin/ads',{items:[],revision:0})]);assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
+  assert.equal((await call('/api/admin/ads',{items:[],revision:0})).status,409);
+  assert.equal((await call('/api/admin/ads',{items:Array(11).fill({}),revision:1})).status,400);
+  assert.equal((await call('/api/admin/ads')).data.revision,1);
+});
+test('v1.5 dining choice persists through payment, kitchen and cancellation and cannot change on retry',async t=>{
+  const {call,pay}=await setup(t);
+  for(const dining_type of ['DINE_IN','TAKEOUT']){
+    const body={key:randomUUID(),dining_type,items:[{menu_id:1,quantity:1,options:[],expected_unit:5500}]};
+    const first=await call('/api/orders',body);assert.equal(first.status,200);assert.equal(first.data.dining_type,dining_type);
+    assert.equal((await call('/api/orders',body)).data.id,first.data.id);
+    assert.equal((await call('/api/orders',{...body,dining_type:dining_type==='DINE_IN'?'TAKEOUT':'DINE_IN'})).status,409);
+    const paid=await pay(first.data.id);assert.equal(paid.data.dining_type,dining_type);
+    assert.equal((await call('/api/admin/orders/'+first.data.id,{expected:'PAID'})).data.order.dining_type,dining_type);
+    assert.equal((await call('/api/admin/orders/'+first.data.id+'/cancel',{expected:'PREPARING',reason:'검증'})).data.order.dining_type,dining_type);
+  }
+});
+test('v1.5 invalid dining value is rejected; legacy request is unknown; simultaneous different choices cannot overwrite',async t=>{
+  const {call,create}=await setup(t);assert.equal((await create()).dining_type,null);
+  const body={key:randomUUID(),items:[{menu_id:1,quantity:1,options:[],expected_unit:5500}]};
+  for(const dining_type of ['DELIVERY','',0,{}])assert.equal((await call('/api/orders',{...body,dining_type})).status,400);
+  const results=await Promise.all(['DINE_IN','TAKEOUT'].map(dining_type=>call('/api/orders',{...body,dining_type})));assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
+});
 
 test('Worker persists full menu order and rejects stale, missing or duplicate IDs',async t=>{
   const {call,menu}=await setup(t), ids=menu.map(m=>m.id).reverse();

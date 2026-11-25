@@ -32,7 +32,7 @@ async function main(){
     const initial=(await api(admin,'/api/admin/menu')).menu, fries=initial.find(m=>m.category==='side');
     await api(admin,'/api/admin/menu/'+fries.id,{...fries,is_sold_out:false,photo});
     await api(admin,'/api/admin/menu',{key:randomUUID(),name:'치킨너겟',description:'한 입에 쏙! 부드러운 닭고기살로 꽉 채운 영양 만점 스낵',category:'side',base_price:3000,is_sold_out:false,options:[],photo});
-    await customer.goto(base);await customer.locator('[data-category=side]').click();
+    await customer.goto(base);await customer.locator('[data-dining=DINE_IN]').click();await customer.locator('[data-category=side]').click();
     for(const width of [1280,540,390,320]){
       await customer.setViewportSize({width,height:1000});
       const boxes=await customer.locator('.menu-card').evaluateAll(cards=>cards.map(c=>{
@@ -69,6 +69,7 @@ async function main(){
     await customer.locator('[data-action=pay]').click();await customer.locator('[data-action=retry]').waitFor();
     const cancelledId=await customer.evaluate(()=>JSON.parse(sessionStorage.getItem('burger-kiosk-session-v1')).orderId);
     customer.once('dialog',dialog=>dialog.accept());await customer.locator('[data-action=cancel-order]').click();
+    await customer.locator('[data-dining=DINE_IN]').click();
     await customer.locator('.menu-card').first().waitFor();
     assert.equal((await api(customer,'/api/orders/'+cancelledId)).status,'CANCELLED');
     assert.equal((await api(admin,'/api/admin/orders')).orders.length,0);

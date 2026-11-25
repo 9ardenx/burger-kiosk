@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS orders (
     id TEXT PRIMARY KEY, customer TEXT NOT NULL, request_key TEXT NOT NULL,
     cart_signature TEXT NOT NULL, total_amount INTEGER NOT NULL,
     number INTEGER UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, cancelled_at TEXT,
-    cancelled_by TEXT, cancel_reason TEXT,
+    cancelled_by TEXT, cancel_reason TEXT, dining_type TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING_PAYMENT'
         CHECK(status IN ('PENDING_PAYMENT','PAID','PREPARING','READY','COMPLETED')),
     UNIQUE(customer, request_key)
@@ -51,3 +51,5 @@ CREATE TABLE IF NOT EXISTS menu_display_order (
 CREATE TABLE IF NOT EXISTS category_catalog(id INTEGER PRIMARY KEY,items TEXT NOT NULL DEFAULT '[]',revision INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS admin_auth(id INTEGER PRIMARY KEY,password_hash TEXT,salt TEXT,iterations INTEGER NOT NULL DEFAULT 100000,revision INTEGER NOT NULL DEFAULT 0,recovery_hash TEXT,changed_at TEXT);
 CREATE TABLE IF NOT EXISTS auth_attempt(key TEXT PRIMARY KEY,count INTEGER NOT NULL DEFAULT 0,expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS ad_catalog(id INTEGER PRIMARY KEY,items TEXT NOT NULL DEFAULT '[]',revision INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS ad_photo(key TEXT PRIMARY KEY,content BLOB NOT NULL);

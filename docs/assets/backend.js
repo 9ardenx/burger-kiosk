@@ -31,3 +31,4 @@ async function api(path,body) {
 export { api };
 
 export const photoUrl = key => new URL("/api/menu-photos/"+key, API_ORIGIN).href;
+export const adPhotoUrl = key => new URL('/api/ad-photos/'+key, API_ORIGIN).href;

@@ -16,7 +16,7 @@ export const orders = sqliteTable("orders", {
   id: text().primaryKey(), customer: text().notNull(), signature: text().notNull(),
   total: integer().notNull(), status: text().notNull().default("PENDING_PAYMENT"),
   number: integer().unique(), created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`), cancelled_at: text(),
-  cancelled_by: text(), cancel_reason: text(),
+  cancelled_by: text(), cancel_reason: text(), dining_type: text(),
   creation_tag: text().notNull()
 });
 export const items = sqliteTable("order_item", {
@@ -53,4 +53,7 @@ export const adminAuth = sqliteTable('admin_auth', {
 });
 export const authAttempt = sqliteTable('auth_attempt', {
   key: text().primaryKey(), count: integer().notNull().default(0), expires: integer().notNull()
+});
+export const adCatalog = sqliteTable('ad_catalog', {
+  id: integer().primaryKey(), items: text().notNull().default('[]'), revision: integer().notNull().default(0)
 });

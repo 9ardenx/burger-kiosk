@@ -19,6 +19,7 @@ async function routes(page){await page.route('**/*',async route=>{
   if(p.startsWith('/api/menu-photos/'))return route.fulfill({contentType:'image/jpeg',body:files.get(p.split('/').at(-1))});
   let data;
   if(p==='/api/menu')data={menu:menu.filter(m=>!m.is_sold_out),mode:'demo',clientKey:''};
+  else if(p==='/api/ads')data={items:[],revision:0};
   else if(p==='/api/admin/login')data={token:'fixture-token'};
   else if(p==='/api/admin/logout')data={ok:true};
   else if(p==='/api/admin/orders')data={orders:[]};
@@ -45,7 +46,7 @@ async function main(){
  let browser=await chromium.launch({headless:true,executablePath:chrome});
  try {
   const page=await browser.newPage({viewport:{width:1280,height:1000}});page.on('pageerror',e=>errors.push(e.message));await routes(page);
-  await page.goto('https://photos.test/');await page.locator('.menu-card').first().waitFor();
+  await page.goto('https://photos.test/');await page.locator('[data-dining=DINE_IN]').click();await page.locator('.menu-card').first().waitFor();
   await page.locator('.menu-card img').evaluateAll(images=>Promise.all(images.map(i=>i.decode())));
   assert.deepEqual(await page.locator('.menu-card img').evaluateAll(images=>images.map(i=>[i.naturalWidth,i.naturalHeight])),manifest.photos.map(()=>[720,465]));
   pass('All seven publishing JPEGs decode to exactly 720x465; archived originals match their hashes');
@@ -90,7 +91,7 @@ async function main(){
   fs.writeFileSync(path.join(profile,'Default/Preferences'),JSON.stringify({partition:{default_zoom_level:{x:Math.log(zoom)/Math.log(1.2)}}}));
   const context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:chrome,viewport:null,args:['--force-device-scale-factor=1','--window-size=1440,1100']});
   try {
-   const page=context.pages()[0];page.on('pageerror',e=>errors.push(e.message));await routes(page);await page.goto('https://photos.test/');await page.locator('.menu-card').first().waitFor();
+   const page=context.pages()[0];page.on('pageerror',e=>errors.push(e.message));await routes(page);await page.goto('https://photos.test/');await page.locator('[data-dining=DINE_IN]').click();await page.locator('.menu-card').first().waitFor();
    assert.ok(Math.abs(await page.evaluate(()=>devicePixelRatio)-zoom)<.001);
    for(const width of [320,390,540,768,1024,1280]){
     await page.setViewportSize({width:Math.round(width*zoom),height:Math.round(1000*zoom)});

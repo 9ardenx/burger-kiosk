@@ -20,7 +20,7 @@ async function main(){
   await api(admin,'/api/admin/menu/'+fries.id,{...fries,is_sold_out:false,photo:fs.readFileSync(path.join(root,'assets/menu/published/fries.jpg')).toString('base64')});
   await admin.locator('[data-tab=menu]').click();await admin.locator(`[data-toggle-stock="${fries.id}"]`).waitFor();
   const before=(await api(admin,'/api/admin/menu')).menu;
-  await customer.goto(base);await customer.locator(`.menu-card[data-id="${fries.id}"]`).click();await customer.locator('#option-form [type=submit]').click();
+  await customer.goto(base);await customer.locator('[data-dining=DINE_IN]').click();await customer.locator(`.menu-card[data-id="${fries.id}"]`).click();await customer.locator('#option-form [type=submit]').click();
   await admin.locator(`[data-toggle-stock="${fries.id}"]`).click();await admin.getByRole('button',{name:'감자튀김 판매 재개',exact:true}).waitFor();
   const sold=(await api(admin,'/api/admin/menu')).menu;
   assert.deepEqual(sold.map(m=>m.id),before.map(m=>m.id));

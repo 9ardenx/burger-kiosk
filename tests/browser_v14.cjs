@@ -18,7 +18,7 @@ async function main(){
   const login=async(page,value)=>{await page.goto(base+'/admin');await page.locator('[name=password]').fill(value);await page.locator('#login button').click();await page.locator('#order-rows').waitFor();};
   const saveCategories=async()=>{await admin.locator('#category-settings [type=submit]').click();await admin.getByText('분류 이름과 순서를 저장했습니다.',{exact:true}).waitFor();};
   const initial=(await api(customer,'/api/menu')).menu;
-  await login(admin,password);await login(other,password);await customer.goto(base);await customer.locator('[data-category=side]').waitFor();
+  await login(admin,password);await login(other,password);await customer.goto(base);await customer.locator('[data-dining=DINE_IN]').click();await customer.locator('[data-category=side]').waitFor();
   await admin.locator('[data-tab=categories]').click();await admin.locator('[data-category-name=side]').fill('곁들임');
   await admin.locator('[data-category-move="1"][data-direction="-1"]').click();await saveCategories();
   await customer.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));

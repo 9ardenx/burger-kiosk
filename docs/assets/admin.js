@@ -3,6 +3,8 @@ import {editorHtml,editorData,optionRow} from "./menu-editor.js";
 import {jpegForUpload,photoPosition} from "./menu-photo.js";
 import {categoryName,menuPicture,setCategories} from "./catalog.js";
 import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js';
+import {adList,adEditor} from './advertising-ui.js';
+import {diningName} from './welcome.js';
 import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
 
 const tabs=document.querySelector("#tabs");
@@ -12,6 +14,16 @@ const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 �
 let current="orders", orders=[], menu=[], busy=false, selected=null, filter="open", timer;
 let editor=null, previewUrl=null, previewSequence=0;
 let categoryDraft=[],categorySaved=[],categoryRevision=0,security=null;
+let advertising={items:[],revision:0},adEdit=null,adSequence=0,adDirty=false;
+const adPhotoOptions=form=>({width:1440,height:810,x:Number(form.elements['ad-x'].value)/100,y:Number(form.elements['ad-y'].value)/100});
+async function refreshAdPreview(form){
+  const sequence=++adSequence,file=form.elements['ad-photo'].files[0];if(!file)return;
+  const status=form.querySelector('[data-ad-photo-state]');status.textContent='미리보기 만드는 중…';
+  try{const photo=await jpegForUpload(file,adPhotoOptions(form));if(sequence!==adSequence||!form.isConnected)return;
+    form.querySelector('#ad-preview').src='data:image/jpeg;base64,'+photo;status.textContent='1440 × 810px · 미리보기와 같은 사진이 저장됩니다.';
+  }catch(error){if(sequence===adSequence&&form.isConnected){status.textContent=error.message;notice(error.message);}}
+}
+async function saveAdCatalog(items){advertising=await api('/api/admin/ads',{items,revision:advertising.revision});adEdit=null;adDirty=false;adSequence++;render();}
 const categoriesDirty=()=>JSON.stringify(categoryDraft)!==JSON.stringify(categorySaved);
 let menuRevision=0, savedMenuIds=[], readSequence=0, orderEpoch=0, sessionEpoch=0;
 const pendingOrders=new Set();
@@ -32,7 +44,7 @@ async function refreshPhotoPreview(form) {
     state.textContent=error.message;notice(error.message);
   }
 }
-function closeEditor(){resetPreview();editor=null;}
+function closeEditor(){resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;}
 function login(recovery=false) {
   cancelDialog.close();
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
@@ -79,7 +91,7 @@ function patchOrders() {
     const signature=JSON.stringify(o);
     if(row.dataset.record!==signature){
       row.innerHTML=`<button class="num-link" data-detail="${o.id}" aria-label="주문 ${o.number} 상세">${String(o.number).padStart(3,"0")}</button>
-        <div><strong>${escapeText(o.items[0].name)}${o.items.length>1?" 외 "+(o.items.length-1)+"종":""}</strong><small>${o.items.reduce((s,i)=>s+i.quantity,0)}개 · ${money(o.total)}</small></div>
+        <div><span class="dining-tag ${o.dining_type==='TAKEOUT'?'takeout':''}">${diningName(o.dining_type)}</span><strong>${escapeText(o.items[0].name)}${o.items.length>1?" 외 "+(o.items.length-1)+"종":""}</strong><small>${o.items.reduce((s,i)=>s+i.quantity,0)}개 · ${money(o.total)}</small></div>
         <span class="status ${o.status.toLowerCase()}">${states[o.status]}</span>${nextLabels[o.status]?`<div class="order-actions"><button class="primary compact" data-next="${o.id}" data-status="${o.status}">${nextLabels[o.status]}</button>
         <button class="danger-outline compact" data-cancel-order="${o.id}" aria-label="${String(o.number).padStart(3,'0')}번 주문 직권취소">직권취소</button></div>`:"<span>—</span>"}`;
       row.dataset.record=signature;
@@ -92,19 +104,20 @@ function patchOrders() {
   });
   if(!rows.length&&!host.children.length)host.innerHTML='<div class="table-empty">표시할 주문이 없습니다.</div>';
   const detail=rows.find(o=>o.id===selected), target=document.querySelector("#order-detail");
-  const html=detail?`<section class="panel order-detail"><h2>${String(detail.number).padStart(3,"0")}번 주문 상세</h2>${itemsHtml(detail.items)}
+  const html=detail?`<section class="panel order-detail"><h2>${String(detail.number).padStart(3,"0")}번 주문 상세</h2><p class="dining-summary">${diningName(detail.dining_type)} 주문</p>${itemsHtml(detail.items)}
     ${detail.status==='CANCELLED'?`<div class="error-note">관리자 직권취소 · ${escapeText(new Date(detail.cancelled_at.replace(' ','T')+'Z').toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}))}<br>사유: ${escapeText(detail.cancel_reason||'—')}</div>`:''}
     <div class="total"><span>${detail.status==='CANCELLED'?'모의 결제 취소 금액':'결제 금액'}</span><strong>${money(detail.total)}</strong></div></section>`:"";
   if(target.innerHTML!==html)target.innerHTML=html;
 }
 function render() {
   tabs.hidden=false;
-  tabs.innerHTML=Object.entries({orders:'주문 현황',menu:'메뉴 관리',categories:'분류 관리',security:'암호 관리'}).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
-  app.innerHTML=current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
+  tabs.innerHTML=Object.entries({orders:'주문 현황',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',security:'암호 관리'}).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
+  app.innerHTML=current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
   if(current==="orders")patchOrders();
   setRequestState(busy);
 }
 async function refresh() {
+  if(current==='ads'){advertising=await api('/api/admin/ads');render();return;}
   if(current==="orders"){await refreshOrders();if(!document.querySelector("#order-rows"))render();return;}
   if(current==='security'){security=await api('/api/admin/security');render();return;}
   if(current==='categories'){
@@ -190,6 +203,12 @@ document.addEventListener("submit",event=>{
   }
   act(async()=>{
     const data=new FormData(form);
+    if(form.id==='ad-editor'&&adEdit){
+      const item={id:adEdit.id,title:data.get('ad-title').trim(),description:data.get('ad-description').trim(),enabled:data.has('ad-enabled')};
+      if(form.elements['ad-photo'].files.length)item.photo=await jpegForUpload(form.elements['ad-photo'].files[0],adPhotoOptions(form));
+      const items=advertising.items.map(a=>a.id===item.id?item:a);if(!adEdit.item)items.push(item);
+      await saveAdCatalog(items);notice('광고를 저장했습니다. 고객 첫 화면의 다음 조회에 반영됩니다.');return;
+    }
     if(form.id==='password-reset'){
       await api('/api/admin/reset-password',Object.fromEntries(data));current='orders';login();notice('암호를 재설정했습니다. 새 암호로 로그인한 뒤 복구 코드를 다시 발급해 주세요.');return;
     }
@@ -221,6 +240,11 @@ document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(!b || b.disabled || b.type==="submit" && b.closest("form"))return;
 if(busy)return;
+  if(b.hasAttribute('data-new-ad')||b.dataset.editAd){adEdit={id:b.dataset.editAd||crypto.randomUUID(),item:advertising.items.find(a=>a.id===b.dataset.editAd)??null};adDirty=false;adSequence++;render();return;}
+  if(b.hasAttribute('data-back-ads')){if(adDirty&&!confirm('저장하지 않은 광고 변경을 버리고 돌아갈까요?'))return;closeEditor();render();return;}
+  if(b.dataset.deleteAd){const item=advertising.items.find(a=>a.id===b.dataset.deleteAd);if(item&&confirm('「'+item.title+'」 광고를 삭제할까요?'))act(async()=>{await saveAdCatalog(advertising.items.filter(a=>a.id!==item.id));notice('광고를 삭제했습니다.');});return;}
+  if(b.dataset.toggleAd){act(()=>saveAdCatalog(advertising.items.map(a=>a.id===b.dataset.toggleAd?{...a,enabled:!a.enabled}:a)));return;}
+  if(b.hasAttribute('data-move-ad')){const i=Number(b.dataset.moveAd),j=i+Number(b.dataset.direction);if(j>=0&&j<advertising.items.length){const items=[...advertising.items];[items[i],items[j]]=[items[j],items[i]];act(()=>saveAdCatalog(items));}return;}
   if(b.hasAttribute('data-show-recovery')){notice();login(true);return;}
   if(b.hasAttribute('data-show-login')){notice();login();return;}
   if(b.hasAttribute('data-save-recovery')){
@@ -281,6 +305,7 @@ if(busy)return;
   }
   if(current==="menu"&&!editor&&orderDirty()&&(b.dataset.tab||b.dataset.act==="logout")&&!confirm("저장하지 않은 메뉴 순서를 되돌리고 이동할까요?"))return;
   if(current==='categories'&&categoriesDirty()&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 분류 변경을 되돌리고 이동할까요?'))return;
+  if(current==='ads'&&adDirty&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 광고 변경을 버리고 이동할까요?'))return;
   act(async()=>{
     if(b.dataset.tab){closeEditor();current=b.dataset.tab;await refresh();}
     else if(b.dataset.act==="logout"){await api("/api/admin/logout",{});login();}
@@ -289,6 +314,7 @@ if(busy)return;
 act(async()=>{await refresh();poll();},true);
 
 document.addEventListener("change",event=>{
+  const adForm=event.target.closest('#ad-editor');if(adForm){adDirty=true;if(event.target.name==='ad-photo'){adForm.elements['ad-x'].value=50;adForm.elements['ad-y'].value=50;adForm.querySelector('.ad-crop').hidden=false;void refreshAdPreview(adForm);}return;}
   const form=event.target.closest("#menu-editor");if(!form||!editor)return;
   const image=form.querySelector("#photo-preview");
   if(event.target.name==="photo"){
@@ -306,6 +332,7 @@ document.addEventListener("change",event=>{
   }
 });
 document.addEventListener('input',event=>{
+  const adForm=event.target.closest('#ad-editor');if(adForm){adDirty=true;if(['ad-x','ad-y'].includes(event.target.name))void refreshAdPreview(adForm);return;}
   if(event.target.hasAttribute('data-category-name')){
     const item=categoryDraft.find(c=>c.id===event.target.dataset.categoryName);if(item)item.name=event.target.value;
     const status=document.querySelector('[data-category-dirty]');if(status)status.textContent=categoriesDirty()?'저장하지 않은 변경이 있습니다.':'현재 저장된 분류입니다.';return;
