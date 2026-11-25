@@ -49,7 +49,7 @@ def initialize(path):
         for table, additions in (
             ("menu", {"category": "TEXT NOT NULL DEFAULT 'burger'", "photo_key": "TEXT", "registration_key": "TEXT", "choice_groups": "TEXT NOT NULL DEFAULT '[]'"}),
             ("order_item", {"choice_snapshot": "TEXT NOT NULL DEFAULT '[]'"}),
-            ("orders", {"cancelled_at": "TEXT"}),
+            ("orders", {"cancelled_at": "TEXT", "cancelled_by": "TEXT", "cancel_reason": "TEXT"}),
             ("menu_option", {"active": "INTEGER NOT NULL DEFAULT 1"}),
         ):
             columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}

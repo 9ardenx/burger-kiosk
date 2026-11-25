@@ -5,7 +5,8 @@ import {categoryName,menuPicture} from "./catalog.js";
 import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
 
 const tabs=document.querySelector("#tabs");
-const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료"};
+const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료",CANCELLED:"직권취소"};
+const cancelDialog=document.querySelector('#admin-cancel-dialog');
 const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 완료"};
 let current="orders", orders=[], menu=[], busy=false, selected=null, filter="open", timer;
 let editor=null, previewUrl=null, previewSequence=0;
@@ -30,6 +31,7 @@ async function refreshPhotoPreview(form) {
 }
 function closeEditor(){resetPreview();editor=null;}
 function login() {
+  cancelDialog.close();
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
   closeEditor();
   clearInterval(timer);
@@ -48,7 +50,8 @@ if(editor)return editorHtml(editor.item);
     <div class="admin-menus">
     ${menu.map((item,index)=>`<article class="panel catalog-card" data-menu-id="${item.id}"><img src="${menuPicture(item)}" alt="">
       <div><small>${index+1}번째 · ${categoryName(item.category)} · ${item.is_sold_out?"품절":"판매 중"}</small><h2>${escapeText(item.name)}</h2>
-      <strong>${money(item.base_price)}</strong></div><button class="secondary" data-edit-menu="${item.id}" ${orderDirty()?"disabled":""} aria-label="${escapeText(item.name)} 수정">수정</button>
+      <strong>${money(item.base_price)}</strong></div><div class="catalog-actions"><button class="secondary" data-edit-menu="${item.id}" ${orderDirty()?"disabled":""} aria-label="${escapeText(item.name)} 수정">수정</button>
+      <button class="${item.is_sold_out?'secondary':'danger-outline'}" data-toggle-stock="${item.id}" ${orderDirty()?"disabled":""} aria-label="${escapeText(item.name)} ${item.is_sold_out?'판매 재개':'품절 처리'}">${item.is_sold_out?'판매 재개':'품절 처리'}</button></div>
       <div class="menu-position"><button class="secondary" data-move-menu="${item.id}" data-direction="-1" ${index===0?"disabled":""} aria-label="${escapeText(item.name)} 앞으로 이동">앞으로</button>
       <button class="secondary" data-move-menu="${item.id}" data-direction="1" ${index===menu.length-1?"disabled":""} aria-label="${escapeText(item.name)} 뒤로 이동">뒤로</button></div></article>`).join("")}</div>`;
 
@@ -56,14 +59,14 @@ if(editor)return editorHtml(editor.item);
 function ordersView() {
   return `<div class="heading split"><div><h1>주문 현황</h1><p>결제가 끝난 주문을 확인하고 다음 단계로 이동하세요.</p></div>
     <button class="secondary" data-act="refresh">새로고침</button></div>
-    <div class="filters">${[["open","진행 중"],["done","수령 완료"],["all","전체"]].map(([id,name])=>`<button data-filter="${id}" aria-pressed="${filter===id}">${name}</button>`).join("")}</div>
+    <div class="filters">${[["open","진행 중"],["done","수령 완료"],["cancelled","취소 내역"],["all","전체"]].map(([id,name])=>`<button data-filter="${id}" aria-pressed="${filter===id}">${name}</button>`).join("")}</div>
     <div class="panel orders-panel"><div class="order-head"><span>주문번호</span><span>주문 내역</span><span>현재 상태</span><span>다음 단계</span></div>
     <div id="order-rows"></div></div><div id="order-detail"></div>`;
 }
 
 function patchOrders() {
   const host=document.querySelector("#order-rows");if(!host)return;
-  const rows=orders.filter(o=>filter==="all" || (filter==="done"?o.status==="COMPLETED":o.status!=="COMPLETED"));
+  const rows=orders.filter(o=>filter==="all" || (filter==="done"?o.status==="COMPLETED":filter==="cancelled"?o.status==="CANCELLED":Boolean(nextLabels[o.status])));
   const wanted=new Set(rows.map(o=>o.id));
   for(const child of [...host.children])if(!wanted.has(child.dataset.orderId))child.remove();
   rows.forEach((o,index)=>{
@@ -73,17 +76,21 @@ function patchOrders() {
     if(row.dataset.record!==signature){
       row.innerHTML=`<button class="num-link" data-detail="${o.id}" aria-label="주문 ${o.number} 상세">${String(o.number).padStart(3,"0")}</button>
         <div><strong>${escapeText(o.items[0].name)}${o.items.length>1?" 외 "+(o.items.length-1)+"종":""}</strong><small>${o.items.reduce((s,i)=>s+i.quantity,0)}개 · ${money(o.total)}</small></div>
-        <span class="status ${o.status.toLowerCase()}">${states[o.status]}</span>${nextLabels[o.status]?`<button class="primary compact" data-next="${o.id}" data-status="${o.status}">${nextLabels[o.status]}</button>`:"<span>—</span>"}`;
+        <span class="status ${o.status.toLowerCase()}">${states[o.status]}</span>${nextLabels[o.status]?`<div class="order-actions"><button class="primary compact" data-next="${o.id}" data-status="${o.status}">${nextLabels[o.status]}</button>
+        <button class="danger-outline compact" data-cancel-order="${o.id}" aria-label="${String(o.number).padStart(3,'0')}번 주문 직권취소">직권취소</button></div>`:"<span>—</span>"}`;
       row.dataset.record=signature;
     }
     if(host.children[index]!==row)host.insertBefore(row,host.children[index]??null);
     const pending=pendingOrders.has(o.id), button=row.querySelector("[data-next]");
     if(row.getAttribute("aria-busy")!==String(pending))row.setAttribute("aria-busy",String(pending));
     if(button){button.disabled=pending;const label=pending?"처리 중…":nextLabels[o.status];if(button.textContent!==label)button.textContent=label;}
+    const cancelButton=row.querySelector('[data-cancel-order]');if(cancelButton)cancelButton.disabled=pending;
   });
   if(!rows.length&&!host.children.length)host.innerHTML='<div class="table-empty">표시할 주문이 없습니다.</div>';
   const detail=rows.find(o=>o.id===selected), target=document.querySelector("#order-detail");
-  const html=detail?`<section class="panel order-detail"><h2>${String(detail.number).padStart(3,"0")}번 주문 상세</h2>${itemsHtml(detail.items)}<div class="total"><span>결제 금액</span><strong>${money(detail.total)}</strong></div></section>`:"";
+  const html=detail?`<section class="panel order-detail"><h2>${String(detail.number).padStart(3,"0")}번 주문 상세</h2>${itemsHtml(detail.items)}
+    ${detail.status==='CANCELLED'?`<div class="error-note">관리자 직권취소 · ${escapeText(new Date(detail.cancelled_at.replace(' ','T')+'Z').toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}))}<br>사유: ${escapeText(detail.cancel_reason||'—')}</div>`:''}
+    <div class="total"><span>${detail.status==='CANCELLED'?'모의 결제 취소 금액':'결제 금액'}</span><strong>${money(detail.total)}</strong></div></section>`:"";
   if(target.innerHTML!==html)target.innerHTML=html;
 }
 function render() {
@@ -106,20 +113,33 @@ async function refreshOrders() {
   orders=data.orders.map(o=>pendingOrders.has(o.id)?orders.find(previous=>previous.id===o.id)??o:o);
   if(current==="orders")patchOrders();
 }
-async function advanceOrder(id,expected) {
+async function advanceOrder(id,expected,reason=null) {
   if(pendingOrders.has(id))return;
   const session=sessionEpoch;
   pendingOrders.add(id);orderEpoch++;patchOrders();notice();
   try{
-    const result=await api("/api/admin/orders/"+id,{expected});
+    const result=await api("/api/admin/orders/"+id+(reason===null?'':'/cancel'),{expected,...(reason===null?{}:{reason})});
     if(session!==sessionEpoch)return;
     orders=orders.map(o=>o.id===id?result.order:o);
+    if(reason!==null)notice('주문을 직권취소했습니다. 취소 내역에서 확인할 수 있습니다.');
+    return true;
   }catch(error){
     if(session!==sessionEpoch)return;
     if(error.status===401)login();
     else {notice(error.message);if(error.status===409){pendingOrders.delete(id);await refreshOrders().catch(()=>{});}}
   }finally{if(session===sessionEpoch){pendingOrders.delete(id);orderEpoch++;if(current==="orders")patchOrders();}}
 }
+function openCancel(id) {
+  const order=orders.find(o=>o.id===id);if(!order||!nextLabels[order.status]||pendingOrders.has(id))return;
+  if(order.payment?.mode!=='demo'){notice('PG 결제 주문은 환불 연동 후 취소할 수 있습니다.');return;}
+  cancelDialog.innerHTML=`<form id="admin-cancel-form" class="dialog-body" data-order-id="${id}" data-expected="${order.status}">
+    <h2 id="admin-cancel-title">${String(order.number).padStart(3,'0')}번 주문 직권취소</h2>
+    <p class="muted">${money(order.total)} 모의 결제 주문을 취소합니다. 취소 후에는 조리를 진행할 수 없습니다.</p>
+    <label>취소 사유<textarea name="reason" required maxlength="200" rows="3" placeholder="예: 재료 소진으로 주문 제공 불가"></textarea></label>
+    <p class="error-note" data-cancel-error hidden></p><div class="actions"><button type="button" class="secondary" data-close-cancel>돌아가기</button><button class="danger" type="submit">직권취소 확정</button></div></form>`;
+  cancelDialog.showModal();
+}
+cancelDialog.addEventListener('cancel',event=>{if(cancelDialog.querySelector('form')?.dataset.pending)event.preventDefault();});
 function setRequestState(pending) {
   app.setAttribute("aria-busy", String(pending));
   app.inert=pending;
@@ -148,6 +168,16 @@ function poll() {
 document.addEventListener("submit",event=>{
   event.preventDefault();
   const form=event.target;
+  if(form.id==='admin-cancel-form'){
+    if(form.dataset.pending)return;
+    const reason=form.elements.reason.value.trim();
+    if(!reason){form.elements.reason.setCustomValidity('취소 사유를 입력해 주세요.');form.elements.reason.reportValidity();return;}
+    form.dataset.pending='1';form.inert=true;
+    void advanceOrder(form.dataset.orderId,form.dataset.expected,reason).then(ok=>{
+      if(ok)cancelDialog.close();
+      else {const error=form.querySelector('[data-cancel-error]');error.hidden=false;error.textContent=document.querySelector('#notice').textContent||'취소하지 못했습니다. 최신 주문 상태를 확인해 주세요.';}
+    }).finally(()=>{delete form.dataset.pending;form.inert=false;});return;
+  }
   act(async()=>{
     const data=new FormData(form);
     if(form.id==="login"){
@@ -166,6 +196,13 @@ document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(!b || b.disabled || b.type==="submit" && b.closest("form"))return;
 if(busy)return;
+  if(b.dataset.cancelOrder){openCancel(b.dataset.cancelOrder);return;}
+  if(b.hasAttribute('data-close-cancel')){cancelDialog.close();return;}
+  if(b.dataset.toggleStock){
+    const item=menu.find(m=>m.id===Number(b.dataset.toggleStock));if(!item||orderDirty())return;
+    act(async()=>{await api('/api/admin/menu/'+item.id,{base_price:item.base_price,is_sold_out:!item.is_sold_out,version:item.version});
+      await refresh();notice(item.name+(item.is_sold_out?' 판매를 재개했습니다.':' 메뉴를 품절 처리했습니다.')+' 고객 화면은 다음 자동 조회에 반영됩니다.');});return;
+  }
   if(b.dataset.next){void advanceOrder(b.dataset.next,b.dataset.status);return;}
   if(b.dataset.moveMenu){
     const i=menu.findIndex(m=>m.id===Number(b.dataset.moveMenu)), j=i+Number(b.dataset.direction);
@@ -227,6 +264,7 @@ document.addEventListener("change",event=>{
   }
 });
 document.addEventListener('input',event=>{
+  if(event.target.name==='reason'){event.target.setCustomValidity('');return;}
   if(!['photo-x','photo-y'].includes(event.target.name))return;
   const form=event.target.closest('#menu-editor');if(form&&editor)void refreshPhotoPreview(form);
 });

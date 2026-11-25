@@ -28,7 +28,9 @@ def order_view(db, row):
         (row["id"],),
     ).fetchone()
     return {"id": row["id"], "number": row["number"], "status": "CANCELLED" if row["cancelled_at"] else row["status"], "total": row["total_amount"],
-            "created_at": row["created_at"], "items": items, "payment": dict(payment) if payment else None}
+            "created_at": row["created_at"], "cancelled_at": row["cancelled_at"],
+            "cancelled_by": row["cancelled_by"], "cancel_reason": row["cancel_reason"],
+            "items": items, "payment": dict(payment) if payment else None}
 
 
 def quote_item(db, line):
@@ -102,5 +104,28 @@ def cancel_unpaid(db, order_id, customer):
     pending = db.execute("SELECT 1 FROM payment WHERE order_id=? AND status IN ('PENDING','SUCCESS')", (order_id,)).fetchone()
     if row["status"] != "PENDING_PAYMENT" or pending:
         raise Problem("결제가 진행 중이거나 완료된 주문입니다. 결제 결과를 먼저 확인해 주세요.", 409, "PAYMENT_IN_PROGRESS")
-    db.execute("UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP WHERE id=?", (order_id,))
+    db.execute("UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP, cancelled_by='customer' WHERE id=?", (order_id,))
     return order_view(db, owner_order(db, order_id, customer))
+
+
+def cancel_by_admin(db, order_id, data):
+    reason = data.get("reason")
+    if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 200:
+        raise Problem("취소 사유를 1~200자로 입력해 주세요.")
+    expected = data.get("expected")
+    if not isinstance(expected, str) or expected not in NEXT_STATE:
+        raise Problem("수령 전 주문만 직권취소할 수 있습니다.", 409, "ORDER_CHANGED")
+    row = db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone()
+    if row is None:
+        raise Problem("주문을 찾을 수 없습니다.", 404)
+    if row["cancelled_at"] and row["cancelled_by"] == "admin":
+        return order_view(db, row)
+    if row["cancelled_at"] or row["status"] != expected:
+        raise Problem("주문 상태가 변경되었습니다. 최신 상태를 확인해 주세요.", 409, "ORDER_CHANGED")
+    approved = db.execute("SELECT 1 FROM payment WHERE order_id=? AND status='SUCCESS' AND mode='demo'", (order_id,)).fetchone()
+    unsafe = db.execute("SELECT 1 FROM payment WHERE order_id=? AND (mode!='demo' OR status='PENDING')", (order_id,)).fetchone()
+    if not approved or unsafe:
+        raise Problem("PG 결제는 환불 연동 후 취소할 수 있습니다. 현재 직권취소는 모의 결제 주문만 지원합니다.", 409, "REFUND_REQUIRED")
+    db.execute("UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='admin',cancel_reason=? WHERE id=?",
+               (reason.strip(), order_id))
+    return order_view(db, db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone())

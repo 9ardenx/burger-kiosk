@@ -12,7 +12,7 @@ const dialog = document.querySelector("#options");
 const save = () => sessionStorage.setItem(storageKey, JSON.stringify(state));
 const count = () => state.cart.reduce((sum, line) => sum + line.quantity, 0);
 const total = () => state.cart.reduce((sum, line) => sum + line.unit * line.quantity, 0);
-const currentMenu = id => menu.find(item => item.id === id);
+const currentMenu = id => menu.find(item => item.id === id && !item.is_sold_out);
 let categoryFilter="all";
 const quantityControl = (line, i) => `<div class="quantity">
   <button data-action="minus" data-i="${i}" aria-label="${escapeText(line.name)} 수량 감소" ${line.quantity<=1?"disabled":""}>−</button>
@@ -74,13 +74,13 @@ function cartSummary(edit = false) {
 }
 function menuView() {
   const visible=menu.filter(item=>categoryFilter==="all" || (item.category??"burger")===categoryFilter);
-  const cards = visible.map(item => `<button class="menu-card ${item.kind==="chicken"?"sage":"oat"}" data-action="choose" data-id="${item.id}">
-    <span class="art ${item.photo_key?"with-photo":""}"><img src="${menuPicture(item)}" alt=""></span><span class="card-copy"><strong>${escapeText(item.name)}</strong>
-    <small>${escapeText(item.description)}</small><span class="card-bottom"><b>${money(item.base_price)}</b><span class="add-mark" aria-hidden="true">＋</span></span></span></button>`).join("");
+  const cards = visible.map(item => `<button class="menu-card ${item.kind==="chicken"?"sage":"oat"} ${item.is_sold_out?"sold-out":""}" data-action="choose" data-id="${item.id}" ${item.is_sold_out?'disabled aria-disabled="true"':""}>
+    <span class="art ${item.photo_key?"with-photo":""}"><img src="${menuPicture(item)}" alt="">${item.is_sold_out?'<span class="stock-badge">품절</span>':""}</span><span class="card-copy"><strong>${escapeText(item.name)}</strong>
+    <small>${escapeText(item.description)}</small><span class="card-bottom"><b>${money(item.base_price)}</b>${item.is_sold_out?'<span class="sold-copy">선택 불가</span>':'<span class="add-mark" aria-hidden="true">＋</span>'}</span></span></button>`).join("");
   return `<div class="heading"><h1>메뉴 선택</h1><p>주문할 메뉴를 골라 주세요.</p></div>
     <nav class="filters menu-filters" aria-label="메뉴 분류">${Object.entries({all:"전체",...labels}).map(([id,title])=>
-      `<button data-category="${id}" aria-pressed="${id===categoryFilter}">${title}</button>`).join("")}</nav><div class="shop-layout"><section class="menu-grid" aria-label="판매 중인 메뉴">
-    ${cards||'<p class="panel">이 분류에는 판매 중인 메뉴가 없습니다.</p>'}</section><aside>${cartSummary()}</aside></div>`;
+      `<button data-category="${id}" aria-pressed="${id===categoryFilter}">${title}</button>`).join("")}</nav><div class="shop-layout"><section class="menu-grid" aria-label="메뉴 목록">
+    ${cards||'<p class="panel">이 분류에는 등록된 메뉴가 없습니다.</p>'}</section><aside>${cartSummary()}</aside></div>`;
 }
 function customerGroups(groups, ids, nested=false) {
   return groups.map(group=>{
@@ -163,6 +163,10 @@ function demoSelect() {
 }
 function resultView() {
   if (!order) return checkoutView();
+  if(state.page==='cancelled')return `<div class="narrow"><div class="heading"><h1>주문이 취소되었습니다</h1></div><section class="panel receipt">
+    <p class="error-note">매장에서 ${String(order.number).padStart(3,'0')}번 주문을 취소했습니다.</p>
+    <p>취소 사유: ${escapeText(order.cancel_reason||'매장 요청')}</p>${itemsHtml(order.items)}
+    <div class="total"><span>모의 결제 취소 금액</span><strong>${money(order.total)}</strong></div>${button('reset','메뉴 다시 선택')}</section></div>`;
   if (state.page==="done") return `<div class="narrow"><div class="heading"><h1>주문이 접수되었습니다</h1></div><div class="panel receipt">
     <div class="pickup"><span>주문번호</span><strong>${String(order.number).padStart(3,"0")}</strong></div><p>수령 시 주문번호를 확인해 주세요.</p>
     ${itemsHtml(order.items)}<div class="total"><span>결제 금액</span><strong>${money(order.total)}</strong></div>${button("reset","처음으로")}</div></div>`;
@@ -176,7 +180,7 @@ function resultView() {
     ${failed?'<div class="checkout-exits"><button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div>':""}</section></div>`;
 }
 function render() {
-  const stage={menu:0,cart:1,review:2,failed:2,pending:2,done:3}[state.page] ?? 0;
+  const stage={menu:0,cart:1,review:2,failed:2,pending:2,done:3,cancelled:3}[state.page] ?? 0;
   document.querySelector("#steps").innerHTML = ["메뉴 선택","장바구니","결제","주문 완료"].map((label,i)=>
     `<span class="${i===stage?"active":i<stage?"past":""}" ${i===stage?'aria-current="step"':""}><i>${i+1}</i>${label}</span>`).join("");
   if(state.page==="menu") app.innerHTML=menuView();
@@ -185,6 +189,7 @@ function render() {
   else app.innerHTML=resultView();
 }
 function applyOrder(record) {
+  if(record.status==='CANCELLED'&&record.cancelled_by==='admin'){order=record;state.orderId=record.id;go('cancelled');return;}
   if(record.status==="CANCELLED"){invalidateOrder();go(count()?"cart":"menu");return;}
   order=record; state.orderId=record.id;
   if(record.number!=null) go("done");
@@ -307,11 +312,17 @@ run(boot);
 
 let checkingShelf=false;
 async function refreshShelf() {
-  if(checkingShelf || document.hidden || busy || dialog.open || state.page!=="menu")return;
+  if(checkingShelf || document.hidden || busy || dialog.open)return;
+  if(state.page==='done'&&state.orderId){
+    const id=state.orderId;checkingShelf=true;
+    try{const result=await api('/api/orders/'+id);if(state.page==='done'&&state.orderId===id&&result.status==='CANCELLED')applyOrder(result);}
+    catch{}finally{checkingShelf=false;}return;
+  }
+  if(!['menu','cart'].includes(state.page))return;
   checkingShelf=true;
   try{
     const catalog=await api("/api/menu");
-    if(!busy && !dialog.open && state.page==="menu" && JSON.stringify(menu)!==JSON.stringify(catalog.menu)){
+    if(!busy && !dialog.open && ['menu','cart'].includes(state.page) && JSON.stringify(menu)!==JSON.stringify(catalog.menu)){
       menu=catalog.menu;render();
     }
   } catch { /* The current shelf stays usable while the next refresh is pending. */ }

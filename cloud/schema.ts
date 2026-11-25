@@ -16,6 +16,7 @@ export const orders = sqliteTable("orders", {
   id: text().primaryKey(), customer: text().notNull(), signature: text().notNull(),
   total: integer().notNull(), status: text().notNull().default("PENDING_PAYMENT"),
   number: integer().unique(), created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`), cancelled_at: text(),
+  cancelled_by: text(), cancel_reason: text(),
   creation_tag: text().notNull()
 });
 export const items = sqliteTable("order_item", {

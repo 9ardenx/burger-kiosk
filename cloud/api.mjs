@@ -53,6 +53,7 @@ async function catalog(db, includeSold=false) {
 }
 
 const orderSelect = `SELECT o.id,o.number,CASE WHEN o.cancelled_at IS NOT NULL THEN 'CANCELLED' ELSE o.status END AS status,o.total,o.created_at,
+  o.cancelled_at,o.cancelled_by,o.cancel_reason,
   (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,'variants',json(i.choice_snapshot),
     'options',json((SELECT json_group_array(json_object('name',x.name,'option_price',x.option_price))
       FROM order_item_option x WHERE x.item_id=i.id)))) FROM order_item i WHERE i.order_id=o.id) AS items,
@@ -141,12 +142,29 @@ async function attempt(db,customer,id,body) {
 }
 
 async function cancelUnpaid(db,customer,id) {
-  await statement(db,`UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP WHERE id=? AND customer=?
+  await statement(db,`UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='customer' WHERE id=? AND customer=?
     AND status='PENDING_PAYMENT' AND cancelled_at IS NULL
     AND NOT EXISTS(SELECT 1 FROM payment WHERE order_id=? AND status IN ('PENDING','SUCCESS'))`,id,customer,id).run();
   const order=await readOrder(db,id,customer);
   check(order.status==="CANCELLED","결제가 진행 중이거나 완료된 주문입니다. 결제 결과를 먼저 확인해 주세요.",409,"PAYMENT_IN_PROGRESS");
   return order;
+}
+
+async function cancelByAdmin(db,id,body) {
+  check(typeof body.reason==='string' && body.reason.trim().length>=1 && body.reason.trim().length<=200,
+    '취소 사유를 1~200자로 입력해 주세요.');
+  check(Object.hasOwn(NEXT,body.expected),'수령 전 주문만 직권취소할 수 있습니다.',409,'ORDER_CHANGED');
+  // One conditional write arbitrates cancel vs. kitchen progression; approval history remains intact.
+  const result=await statement(db,`UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='admin',cancel_reason=?
+    WHERE id=? AND status=? AND cancelled_at IS NULL
+    AND EXISTS(SELECT 1 FROM payment WHERE order_id=? AND status='SUCCESS' AND mode='demo')
+    AND NOT EXISTS(SELECT 1 FROM payment WHERE order_id=? AND (mode!='demo' OR status='PENDING'))`,
+    body.reason.trim(),id,body.expected,id,id).run();
+  const row=await statement(db,orderSelect+' WHERE o.id=?',id).first();
+  check(row,'주문을 찾을 수 없습니다.',404);
+  if(result.meta.changes || (row.cancelled_at && row.cancelled_by==='admin'))return {order:toView(row)};
+  check(!row.cancelled_at && row.status===body.expected,'주문 상태가 변경되었습니다. 최신 상태를 확인해 주세요.',409,'ORDER_CHANGED');
+  throw new Problem('PG 결제는 환불 연동 후 취소할 수 있습니다. 현재 직권취소는 모의 결제 주문만 지원합니다.',409,'REFUND_REQUIRED');
 }
 
 async function reorderMenu(db,body) {
@@ -290,6 +308,8 @@ async function adminRoute(db,env,path,request,body) {
       body.base_price,Number(body.is_sold_out),Number(match[1]),body.version).run();
     check(r.meta.changes===1,"메뉴가 변경되었습니다. 다시 확인해 주세요.",409,"MENU_CHANGED");return {ok:true};
   }
+  match=path.match(/^\/api\/admin\/orders\/([a-f0-9]{32})\/cancel$/);
+  if(match && body)return cancelByAdmin(db,match[1],body);
   match=path.match(/^\/api\/admin\/orders\/([a-f0-9]{32})$/);
   if(match && body){
     check(Object.hasOwn(NEXT,body.expected),"변경할 수 없는 주문 상태입니다.",409);
@@ -313,7 +333,7 @@ async function dispatch(request,env,path) {
     check(body && typeof body==="object" && !Array.isArray(body),"입력값을 확인해 주세요.");
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
-  if(path==="/api/menu" && !body)return {menu:await catalog(db),mode:"demo",clientKey:""};
+  if(path==="/api/menu" && !body)return {menu:await catalog(db,true),mode:"demo",clientKey:""};
   const token=request.headers.get("X-Kiosk-Session");
   check(validKey(token),"고객 세션을 확인해 주세요.",401);
   const customer=await digest(token);

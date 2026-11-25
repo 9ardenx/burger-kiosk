@@ -76,3 +76,25 @@ dialog{padding:0;width:min(435px,calc(100% - 28px));max-height:92dvh;border:1px 
 .photo-crop{margin:14px 0}.photo-crop p{font-size:.88rem;margin-bottom:14px}
 .photo-crop input[type=range]{width:100%;min-height:36px;padding:0;accent-color:var(--green)}
 .photo-crop [data-photo-state]{margin-top:4px}
+
+.menu-card.sold-out:disabled{opacity:1;cursor:not-allowed;box-shadow:none}
+.menu-card.sold-out .art{position:relative}
+.menu-card.sold-out .art img{opacity:.32;filter:grayscale(.65)}
+.menu-card.sold-out .card-copy{opacity:.58}
+.stock-badge{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);padding:9px 22px;border-radius:30px;background:#20332be8;color:white;font-weight:800;font-size:1.2rem;line-height:1.5;white-space:nowrap}
+.sold-copy{font-size:.85rem;font-weight:700}
+@keyframes stock-photo-fade{from{opacity:1}to{opacity:.32}}
+@keyframes stock-label-show{from{opacity:0}to{opacity:1}}
+@media(prefers-reduced-motion:no-preference){.sold-out .art img{animation:stock-photo-fade .28s ease-out}.stock-badge{animation:stock-label-show .28s ease-out}}
+.catalog-actions{display:flex;flex-direction:column;gap:8px;min-width:100px}
+.order-actions{display:flex;gap:8px;flex-wrap:wrap}
+.danger,.danger-outline{font:inherit;font-weight:700;border:1px solid #a34636;border-radius:9px;padding:10px 15px;min-height:44px;background:#a34636;color:#fff}
+.danger-outline{background:#fff;color:#963c2e}
+.danger:hover:not(:disabled){background:#843326}.danger-outline:hover:not(:disabled){background:#fff1eb}
+.status.cancelled{background:#fbece8;color:#963c2e}
+#admin-cancel-dialog{width:min(500px,calc(100% - 28px))}
+#admin-cancel-dialog label{display:grid;gap:8px;margin:18px 0}
+#admin-cancel-dialog textarea{font:inherit;width:100%;resize:vertical;min-height:100px;border:1px solid #b7c6bb;border-radius:8px;padding:10px}
+#admin-cancel-dialog textarea:focus-visible{outline:3px solid #c5812d;outline-offset:3px}
+#admin-cancel-dialog .error-note{margin-bottom:14px}
+@media(max-width:540px){.order-grid .order-actions{grid-column:2/4;justify-self:stretch}.order-actions button{flex:1}.catalog-actions{min-width:92px}.catalog-actions button{padding:9px;font-size:.9rem}.stock-badge{font-size:1rem;padding:7px 16px}.filters{flex-wrap:wrap}}

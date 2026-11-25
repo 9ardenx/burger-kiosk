@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS orders (
     id TEXT PRIMARY KEY, customer TEXT NOT NULL, request_key TEXT NOT NULL,
     cart_signature TEXT NOT NULL, total_amount INTEGER NOT NULL,
     number INTEGER UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, cancelled_at TEXT,
+    cancelled_by TEXT, cancel_reason TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING_PAYMENT'
         CHECK(status IN ('PENDING_PAYMENT','PAID','PREPARING','READY','COMPLETED')),
     UNIQUE(customer, request_key)

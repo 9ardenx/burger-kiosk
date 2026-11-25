@@ -67,7 +67,7 @@ class Handler(BaseHTTPRequestHandler):
         server = self.server
         if route == "/api/menu" and data is None:
             with connection(server.db_path) as db:
-                return {"menu": menu_list(db), "mode": server.gateway.mode, "clientKey": server.gateway.client_key}
+                return {"menu": menu_list(db, all_items=True), "mode": server.gateway.mode, "clientKey": server.gateway.client_key}
         if route == "/api/admin/login" and data is not None:
             password = data.get("password")
             if not isinstance(password, str) or not hmac.compare_digest(password.encode(), server.password.encode()):
@@ -104,6 +104,9 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         edit_menu(db, int(match[1]), data)
                     return {"ok": True}
+                match = re.fullmatch(r"/api/admin/orders/([a-f0-9]{32})/cancel", route)
+                if match and data is not None:
+                    return {"order": orders.cancel_by_admin(db, match[1], data)}
                 match = re.fullmatch(r"/api/admin/orders/([a-f0-9]{32})", route)
                 if match and data is not None:
                     orders.advance(db, match[1], data.get("expected"))
