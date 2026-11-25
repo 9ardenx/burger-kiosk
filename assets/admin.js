@@ -5,14 +5,14 @@ import {categoryName,menuPicture,setCategories} from "./catalog.js";
 import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js';
 import {adList,adEditor} from './advertising-ui.js';
 import {diningName} from './welcome.js';
-import {salesView,inventoryView,periodPreset} from './insights-ui.js';
+import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261126-inventory-2';
 import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
 
 const tabs=document.querySelector("#tabs");
 const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료",CANCELLED:"직권취소"};
 const cancelDialog=document.querySelector('#admin-cancel-dialog');
 const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 완료"};
-let current="orders", orders=[], menu=[], busy=false, selected=null, filter="open", timer;
+let current=location.hash==='#inventory'?'inventory':'orders', orders=[], menu=[], busy=false, selected=null, filter="open", timer;
 let editor=null, previewUrl=null, previewSequence=0;
 let categoryDraft=[],categorySaved=[],categoryRevision=0,security=null;
 let advertising={items:[],revision:0},adEdit=null,adSequence=0,adDirty=false;
