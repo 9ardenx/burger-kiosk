@@ -27,8 +27,8 @@ async function main(){
       const response=data===undefined?await page.request.get(base+url):await page.request.post(base+url,{data});
       const body=await response.json();assert.equal(response.status(),200,JSON.stringify(body));return body;
     };
-    const photo=await admin.evaluate(()=>{const c=document.createElement('canvas');c.width=720;c.height=489;
-      const x=c.getContext('2d');x.fillStyle='#ecd6b3';x.fillRect(0,0,720,489);x.fillStyle='#bd7f3f';x.fillRect(150,100,420,250);return c.toDataURL('image/jpeg').split(',')[1];});
+    const photo=await admin.evaluate(()=>{const c=document.createElement('canvas');c.width=720;c.height=465;
+      const x=c.getContext('2d');x.fillStyle='#ecd6b3';x.fillRect(0,0,720,465);x.fillStyle='#bd7f3f';x.fillRect(150,100,420,250);return c.toDataURL('image/jpeg').split(',')[1];});
     const initial=(await api(admin,'/api/admin/menu')).menu, fries=initial.find(m=>m.category==='side');
     await api(admin,'/api/admin/menu/'+fries.id,{...fries,is_sold_out:false,photo});
     await api(admin,'/api/admin/menu',{key:randomUUID(),name:'치킨너겟',description:'한 입에 쏙! 부드러운 닭고기살로 꽉 채운 영양 만점 스낵',category:'side',base_price:3000,is_sold_out:false,options:[],photo});
@@ -39,7 +39,7 @@ async function main(){
         const a=c.querySelector('.art'),r=c.getBoundingClientRect(),s=a.getBoundingClientRect();
         return {cardTop:r.top,imageTop:s.top,imageWidth:s.width,imageHeight:s.height};}));
       assert.equal(boxes.length,2);
-      for(const box of boxes){assert.ok(Math.abs(box.imageTop-box.cardTop-1)<.6);assert.ok(Math.abs(box.imageWidth/box.imageHeight-1.55)<.01);}
+      for(const box of boxes){assert.ok(Math.abs(box.imageTop-box.cardTop)<.02);assert.ok(Math.abs(box.imageWidth/box.imageHeight-720/465)<.01);}
       assert.equal(await customer.locator('.art.with-photo img').evaluateAll(images=>images.every(i=>getComputedStyle(i).objectFit==='contain')),true);
       assert.equal(await customer.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     }

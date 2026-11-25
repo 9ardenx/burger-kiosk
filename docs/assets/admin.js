@@ -1,5 +1,6 @@
 import {handleVariantButton} from "./group-editor.js";
 import {editorHtml,editorData,optionRow} from "./menu-editor.js";
+import {jpegForUpload,photoPosition} from "./menu-photo.js";
 import {categoryName,menuPicture} from "./catalog.js";
 import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
 
@@ -7,11 +8,26 @@ const tabs=document.querySelector("#tabs");
 const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료"};
 const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 완료"};
 let current="orders", orders=[], menu=[], busy=false, selected=null, filter="open", timer;
-let editor=null, previewUrl=null;
+let editor=null, previewUrl=null, previewSequence=0;
 let menuRevision=0, savedMenuIds=[], readSequence=0, orderEpoch=0, sessionEpoch=0;
 const pendingOrders=new Set();
 const orderDirty=()=>JSON.stringify(menu.map(m=>m.id))!==JSON.stringify(savedMenuIds);
-function resetPreview(){if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=null;}
+function resetPreview(){previewSequence++;previewUrl=null;}
+async function refreshPhotoPreview(form) {
+  const sequence=++previewSequence, file=form.elements.photo.files[0];
+  if(!file)return;
+  const state=form.querySelector('[data-photo-state]');state.textContent='미리보기 만드는 중…';
+  try {
+    const photo=await jpegForUpload(file,photoPosition(form));
+    if(sequence!==previewSequence||!form.isConnected)return;
+    previewUrl='data:image/jpeg;base64,'+photo;
+    form.querySelector('#photo-preview').src=previewUrl;
+    state.textContent='720 × 465px · 미리보기와 같은 사진이 저장됩니다.';
+  } catch(error) {
+    if(sequence!==previewSequence||!form.isConnected)return;
+    state.textContent=error.message;notice(error.message);
+  }
+}
 function closeEditor(){resetPreview();editor=null;}
 function login() {
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
@@ -176,6 +192,7 @@ if(busy)return;
   if(b.hasAttribute("data-remove-option")){b.closest(".option-edit").remove();return;}
   if(b.hasAttribute("data-clear-photo")){
     const form=b.closest("form");resetPreview();form.elements.photo.value="";form.dataset.clearPhoto="1";
+    form.querySelector('.photo-crop').hidden=true;
     form.querySelector("#photo-preview").src=menuPicture({...editor.item,category:form.elements.category.value,photo_key:null});return;
   }
   if(b.dataset.filter){filter=b.dataset.filter;for(const item of app.querySelectorAll("[data-filter]"))item.setAttribute("aria-pressed",String(item.dataset.filter===filter));patchOrders();return;}
@@ -198,10 +215,18 @@ document.addEventListener("change",event=>{
   if(event.target.name==="photo"){
     const file=form.elements.photo.files[0];if(!file)return;
     if(!["image/jpeg","image/png","image/webp"].includes(file.type)||file.size>10*1024*1024){
-      form.elements.photo.value="";notice("10 MB 이하의 JPG, PNG, WebP 파일을 선택해 주세요.");return;
+      resetPreview();form.elements.photo.value="";form.querySelector('.photo-crop').hidden=true;
+      image.src=menuPicture({...editor.item,category:form.elements.category.value,...(form.dataset.clearPhoto?{photo_key:null}:{})});
+      notice("10 MB 이하의 JPG, PNG, WebP 파일을 선택해 주세요.");return;
     }
-    resetPreview();previewUrl=URL.createObjectURL(file);image.src=previewUrl;delete form.dataset.clearPhoto;notice();
-  } else if(event.target.name==="category" && !previewUrl && (!editor.item?.photo_key||form.dataset.clearPhoto)){
+    resetPreview();form.elements['photo-x'].value=50;form.elements['photo-y'].value=50;
+    form.querySelector('.photo-crop').hidden=false;delete form.dataset.clearPhoto;notice();
+    void refreshPhotoPreview(form);
+  } else if(event.target.name==="category" && !form.elements.photo.files.length && (!editor.item?.photo_key||form.dataset.clearPhoto)){
     image.src=menuPicture({...editor.item,category:form.elements.category.value,photo_key:null});
   }
+});
+document.addEventListener('input',event=>{
+  if(!['photo-x','photo-y'].includes(event.target.name))return;
+  const form=event.target.closest('#menu-editor');if(form&&editor)void refreshPhotoPreview(form);
 });

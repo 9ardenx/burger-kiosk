@@ -1,0 +1,135 @@
+{
+  "standard": "720x465 JPEG",
+  "method": "Aspect-preserving crop to 720x465. Fries uses the user-provided screenshot with only the outer frame removed. No generated content.",
+  "photos": [
+    {
+      "menu_id": 1,
+      "name": "클래식버거",
+      "file": "classic-burger.jpg",
+      "width": 720,
+      "height": 465,
+      "source_sha256": "30132624add01de8b05156f0744bbc15d027b0f09523083be7c9c6191391883c",
+      "sha256": "8ef891d8bd78e98d8b834905a67e2140d1886cd17133eb6a477f77e5479f3376",
+      "bytes": 30866,
+      "source_width": 720,
+      "source_height": 468,
+      "crop": {
+        "sx": 0,
+        "sy": 1.5,
+        "sw": 720,
+        "sh": 465
+      }
+    },
+    {
+      "menu_id": 2,
+      "name": "치킨버거",
+      "file": "chicken-burger.jpg",
+      "width": 720,
+      "height": 465,
+      "source_sha256": "e6ce214147009cd05e5d3af77edb961d305ce6aaa6667d86e61c88325044ed61",
+      "sha256": "884ddce3c8a166450da84d1021921b4e4db5c2bc8ac0d71e2c7eaaee6f2a06d2",
+      "bytes": 33301,
+      "source_width": 720,
+      "source_height": 468,
+      "crop": {
+        "sx": 0,
+        "sy": 1.5,
+        "sw": 720,
+        "sh": 465
+      }
+    },
+    {
+      "menu_id": 3,
+      "name": "감자튀김",
+      "file": "fries.jpg",
+      "width": 720,
+      "height": 465,
+      "source_sha256": "48c410aad16bfd6ce171ac8c0f5a6a5511f41e79fb100e80cb0e6b3c17b66932",
+      "sha256": "25da9a1526ec4b756457172b48d198c681598883c00baf7723da08de6f03e7b7",
+      "bytes": 39980,
+      "source_width": 413,
+      "source_height": 281,
+      "crop": {
+        "sx": 9,
+        "sy": 12,
+        "sw": 396,
+        "sh": 255.75
+      },
+      "previous_photo_key": "0da304da1004f63dbfd0813eab0b9416561fa4b596e9d838ed78121a695f4f9e",
+      "source_file": "../sources/fries-screenshot-20261125.png",
+      "method": "Deterministic screenshot border crop and proportional resize; no regenerated photo content."
+    },
+    {
+      "menu_id": 4,
+      "name": "탄산음료",
+      "file": "soda.jpg",
+      "width": 720,
+      "height": 465,
+      "source_sha256": "7257f29993f08708204bd48c18dc754929b6dc0f56cd0070b6b6efe329cb3817",
+      "sha256": "19cf806d3567c60a817bfa2456c73471f7bce547a9e8a7e2f87b34e6887f7dd6",
+      "bytes": 37796,
+      "source_width": 720,
+      "source_height": 480,
+      "crop": {
+        "sx": 0,
+        "sy": 7.5,
+        "sw": 720,
+        "sh": 465
+      }
+    },
+    {
+      "menu_id": 5,
+      "name": "치킨너겟",
+      "file": "chicken-nuggets.jpg",
+      "width": 720,
+      "height": 465,
+      "source_sha256": "35e7d3e836fbf49609ce593f75204adf89e2812a2600d73f0c4a3491f6b75f2e",
+      "sha256": "cf98210fa0bd55dfda0d7ff11d575d33457ebd9c2e17c1a550911c0df6fd1700",
+      "bytes": 33582,
+      "source_width": 720,
+      "source_height": 468,
+      "crop": {
+        "sx": 0,
+        "sy": 1.5,
+        "sw": 720,
+        "sh": 465
+      }
+    },
+    {
+      "menu_id": 6,
+      "name": "버팔로윙 (6p)",
+      "file": "buffalo-wings.jpg",
+      "width": 720,
+      "height": 465,
+      "source_sha256": "509edbe11262c56b6b344d5401082596c81ccd9dd1d012882a5954474a278043",
+      "sha256": "069ebcb10124c719447263f4818b88bb1dab44dd3da07b5a80fc7991d9c6660b",
+      "bytes": 34249,
+      "source_width": 720,
+      "source_height": 468,
+      "crop": {
+        "sx": 0,
+        "sy": 1.5,
+        "sw": 720,
+        "sh": 465
+      }
+    },
+    {
+      "menu_id": 7,
+      "name": "새우 버거",
+      "file": "shrimp-burger.jpg",
+      "width": 720,
+      "height": 465,
+      "source_sha256": "24193ce38dd686b3af5e14ed04f0663ceb1ea44dad04aa29da65f87c920f2646",
+      "sha256": "582456f7192a8e6c91f1873038b882fb480e1704eef714dcdd55caf1570b5cf4",
+      "bytes": 31432,
+      "source_width": 720,
+      "source_height": 468,
+      "crop": {
+        "sx": 0,
+        "sy": 1.5,
+        "sw": 720,
+        "sh": 465
+      }
+    }
+  ]
+}
