@@ -26,7 +26,7 @@ def main():
         except FileExistsError:
             pass
         password = password_file.read_text(encoding="utf-8").strip()
-        print(f"관리자 암호 파일: {password_file.resolve()}", flush=True)
+        print(f"초기 관리자 암호 파일(암호 변경 후에는 변경한 암호 사용): {password_file.resolve()}", flush=True)
     if not password.strip():
         parser.error("관리자 암호를 설정해 주세요.")
     print(f"고객  http://127.0.0.1:{args.port}/\n관리  http://127.0.0.1:{args.port}/admin", flush=True)

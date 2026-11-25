@@ -5,6 +5,7 @@ import hashlib
 import json
 
 from .variants import validate_groups
+from .categories import category_state
 
 from .store import Problem, identifier, integer
 
@@ -19,7 +20,7 @@ def read_definition(data):
     name = text_value(data.get("name"), 50, "메뉴명")
     description = text_value(data.get("description", ""), 140, "메뉴 설명", required=False)
     category = data.get("category")
-    if category not in ("burger", "side", "drink"):
+    if not isinstance(category, str):
         raise Problem("메뉴 분류를 선택해 주세요.")
     price = integer(data.get("base_price"), 0, 1_000_000, "판매 가격")
     sold = data.get("is_sold_out")
@@ -62,6 +63,8 @@ def photo_key(db, encoded):
 
 def save_listing(db, data, menu_id=None):
     name, description, category, price, sold, options = read_definition(data)
+    if category not in {c['id'] for c in category_state(db)['items']}:
+        raise Problem('메뉴 분류가 변경되었습니다. 다시 선택해 주세요.', 409, 'CATEGORIES_CHANGED')
     groups = None
     if "choice_groups" in data:
         try:

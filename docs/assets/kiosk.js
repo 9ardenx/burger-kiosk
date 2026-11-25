@@ -1,5 +1,5 @@
 import {evaluateGroups} from "./choice-rules.js";
-import {labels, menuPicture} from "./catalog.js";
+import {labels, menuPicture, setCategories} from "./catalog.js";
 import {api, app, money, escapeText, itemsHtml, notice} from "./common.js";
 
 const storageKey = "burger-kiosk-session-v1";
@@ -43,6 +43,7 @@ async function leaveCheckout() {
 async function loadMenu() {
   const catalog = await api("/api/menu");
   menu = catalog.menu; mode = catalog.mode; clientKey = catalog.clientKey;
+  setCategories(catalog.categories);if(categoryFilter!=='all'&&!Object.hasOwn(labels,categoryFilter))categoryFilter='all';
 }
 function syncPrices() {
   for (const line of state.cart) {
@@ -79,7 +80,7 @@ function menuView() {
     <small>${escapeText(item.description)}</small><span class="card-bottom"><b>${money(item.base_price)}</b>${item.is_sold_out?'<span class="sold-copy">선택 불가</span>':'<span class="add-mark" aria-hidden="true">＋</span>'}</span></span></button>`).join("");
   return `<div class="heading"><h1>메뉴 선택</h1><p>주문할 메뉴를 골라 주세요.</p></div>
     <nav class="filters menu-filters" aria-label="메뉴 분류">${Object.entries({all:"전체",...labels}).map(([id,title])=>
-      `<button data-category="${id}" aria-pressed="${id===categoryFilter}">${title}</button>`).join("")}</nav><div class="shop-layout"><section class="menu-grid" aria-label="메뉴 목록">
+      `<button data-category="${escapeText(id)}" aria-pressed="${id===categoryFilter}">${escapeText(title)}</button>`).join("")}</nav><div class="shop-layout"><section class="menu-grid" aria-label="메뉴 목록">
     ${cards||'<p class="panel">이 분류에는 등록된 메뉴가 없습니다.</p>'}</section><aside>${cartSummary()}</aside></div>`;
 }
 function customerGroups(groups, ids, nested=false) {
@@ -322,7 +323,11 @@ async function refreshShelf() {
   checkingShelf=true;
   try{
     const catalog=await api("/api/menu");
-    if(!busy && !dialog.open && ['menu','cart'].includes(state.page) && JSON.stringify(menu)!==JSON.stringify(catalog.menu)){
+    // A popup may open while this request is pending. Apply labels and menus together.
+    if(busy || dialog.open || !['menu','cart'].includes(state.page))return;
+    const oldLabels=JSON.stringify(labels);setCategories(catalog.categories);
+    if(categoryFilter!=='all'&&!Object.hasOwn(labels,categoryFilter))categoryFilter='all';
+    if(JSON.stringify(menu)!==JSON.stringify(catalog.menu)||oldLabels!==JSON.stringify(labels)){
       menu=catalog.menu;render();
     }
   } catch { /* The current shelf stays usable while the next refresh is pending. */ }

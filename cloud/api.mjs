@@ -1,20 +1,13 @@
 import {validateGroups, evaluateGroups} from "../docs/assets/choice-rules.js";
 import sodaGroups from "./drink-example.json" with {type:"json"};
+import {Problem,check} from './problems.mjs';
+import {categoryState,saveCategories,DEFAULT_CATEGORY_JSON,CATEGORY_EXISTS} from './categories.mjs';
+import {loginAdmin,requireAdmin,securityInfo,changePassword,issueRecovery,resetPassword} from './admin-auth.mjs';
 
 const FRONTEND = "https://9ardenx.github.io";
 const NEXT = Object.freeze({PAID:"PREPARING", PREPARING:"READY", READY:"COMPLETED"});
 const utf8 = new TextEncoder();
 
-class Problem extends Error {
-  constructor(message, status=400, code="INVALID_INPUT") {
-    super(message);
-    this.status=status;
-    this.code=code;
-  }
-}
-function check(condition, message, status=400, code="INVALID_INPUT") {
-  if (!condition) throw new Problem(message, status, code);
-}
 function validKey(value) {
   return typeof value === "string" && /^[A-Za-z0-9_-]{16,80}$/.test(value);
 }
@@ -190,7 +183,7 @@ function menuDefinition(body) {
     check(Number.isInteger(value)&&value>=0&&value<=1_000_000,"가격을 확인해 주세요.");
     return value;
   };
-  check(["burger","side","drink"].includes(body.category) && typeof body.is_sold_out==="boolean","분류와 판매 상태를 선택해 주세요.");
+  check(typeof body.category==='string' && typeof body.is_sold_out==="boolean","분류와 판매 상태를 선택해 주세요.");
   check(Array.isArray(body.options)&&body.options.length<=20,"옵션은 20개까지 등록할 수 있습니다.");
   const options=body.options.map(option=>{
     check(option && typeof option==="object","옵션을 확인해 주세요.");
@@ -218,6 +211,7 @@ async function storePhoto(bucket, photo) {
 }
 async function saveMenu(db,env,body,id=null) {
   const entry=menuDefinition(body);
+  check((await categoryState(db)).items.some(c=>c.id===entry.category),'메뉴 분류가 변경되었습니다. 다시 선택해 주세요.',409,'CATEGORIES_CHANGED');
   let groups=null;
   if(Object.hasOwn(body,"choice_groups")) {
     try{groups=JSON.stringify(validateGroups(body.choice_groups,entry.options.map(o=>o.name)));}
@@ -241,19 +235,19 @@ async function saveMenu(db,env,body,id=null) {
     if(groups===null)check(JSON.parse(old.choice_groups).every(g=>!g.when_extra || entry.options.some(o=>o.name===g.when_extra)),
       "선택 그룹을 편집하려면 관리자 화면을 새로고침해 주세요.",409,"MENU_CHANGED");
     existingPhoto=old.photo_key;
-    parent="SELECT id FROM menu WHERE id=? AND version=?";
-    args=[id,body.version];
+    parent="SELECT id FROM menu WHERE id=? AND version=? AND "+CATEGORY_EXISTS;
+    args=[id,body.version,DEFAULT_CATEGORY_JSON,entry.category];
   }
   const photo=Object.hasOwn(body,"photo")?await storePhoto(env.BUCKET,body.photo):existingPhoto;
   if(create) {
     statements.push(statement(db,`INSERT OR IGNORE INTO menu(name,description,category,kind,base_price,is_sold_out,
-      photo_key,registration_key,choice_groups,version) VALUES(?,?,?,'custom',?,?,?,?,?,-1)`,
-      entry.name,entry.description,entry.category,entry.price,entry.sold,photo,body.key,groups??"[]"));
+      photo_key,registration_key,choice_groups,version) SELECT ?,?,?,'custom',?,?,?,?,?,-1 WHERE ${CATEGORY_EXISTS}`,
+      entry.name,entry.description,entry.category,entry.price,entry.sold,photo,body.key,groups??"[]",DEFAULT_CATEGORY_JSON,entry.category));
     final=statement(db,"UPDATE menu SET version=0 WHERE registration_key=? AND version=-1",body.key);
   } else {
     statements.push(statement(db,`UPDATE menu_option SET active=0 WHERE menu_id=(${parent}) AND active=1`,...args));
     final=statement(db,`UPDATE menu SET name=?,description=?,category=?,base_price=?,is_sold_out=?,photo_key=?,
-      choice_groups=COALESCE(?,choice_groups),version=version+1 WHERE id=? AND version=?`,entry.name,entry.description,entry.category,entry.price,entry.sold,photo,groups,...args);
+      choice_groups=COALESCE(?,choice_groups),version=version+1 WHERE id=? AND version=? AND ${CATEGORY_EXISTS}`,entry.name,entry.description,entry.category,entry.price,entry.sold,photo,groups,...args);
   }
   for(const option of entry.options) {
     statements.push(option.id===null
@@ -266,27 +260,18 @@ async function saveMenu(db,env,body,id=null) {
     check(results.at(-1).meta.changes===1,"메뉴가 변경되었습니다. 다시 확인해 주세요.",409,"MENU_CHANGED");
     return {id};
   }
-  return statement(db,"SELECT id FROM menu WHERE registration_key=?",body.key).first();
+  const saved=await statement(db,"SELECT id FROM menu WHERE registration_key=?",body.key).first();
+  check(saved,'메뉴 분류가 변경되었습니다. 다시 선택해 주세요.',409,'CATEGORIES_CHANGED');return saved;
 }
 
 async function adminRoute(db,env,path,request,body) {
-  if(path==="/api/admin/login" && body) {
-    const password=body.password;
-    check(env.KIOSK_ADMIN_HASH,"관리자 인증 설정을 확인해 주세요.",503);
-    check(typeof password==="string" && password.length<150 &&
-      await digest(password)===env.KIOSK_ADMIN_HASH,"관리자 암호를 확인해 주세요.",401);
-    const token=crypto.randomUUID()+crypto.randomUUID();
-    await db.batch([
-      statement(db,"DELETE FROM admin_session WHERE expires<=?",Date.now()),
-      statement(db,"INSERT INTO admin_session(digest,expires) VALUES(?,?)",await digest(token),Date.now()+8*60*60*1000)
-    ]);
-    return {ok:true,token};
-  }
-  const bearer=(request.headers.get("Authorization")||"").replace(/^Bearer /,"");
-  check(validKey(bearer),"관리자 로그인이 필요합니다.",401);
-  const hash=await digest(bearer);
-  check(await statement(db,"SELECT 1 FROM admin_session WHERE digest=? AND expires>?",hash,Date.now()).first(),
-    "관리자 로그인이 필요합니다.",401);
+  if(path==='/api/admin/login'&&body)return loginAdmin(db,env,request,body);
+  if(path==='/api/admin/reset-password'&&body)return resetPassword(db,request,body);
+  const hash=await requireAdmin(db,request);
+  if(path==='/api/admin/security'&&!body)return securityInfo(db);
+  if(path==='/api/admin/password'&&body)return changePassword(db,env,request,body);
+  if(path==='/api/admin/recovery-code'&&body)return issueRecovery(db,env,request,body);
+  if(path==='/api/admin/categories')return body?saveCategories(db,body):categoryState(db);
   if(path==="/api/admin/logout" && body){
     await statement(db,"DELETE FROM admin_session WHERE digest=?",hash).run();return {ok:true};
   }
@@ -295,7 +280,7 @@ async function adminRoute(db,env,path,request,body) {
   if(path==="/api/admin/menu" && !body){
     // A revision read before the catalog makes a concurrent reorder a safe conflict.
     const sequence=await db.prepare("SELECT revision FROM menu_display_order WHERE id=1").first();
-    return {menu:await catalog(db,true),order_revision:sequence?.revision??0};
+    return {menu:await catalog(db,true),order_revision:sequence?.revision??0,categories:(await categoryState(db)).items};
   }
   if(path==="/api/admin/orders" && !body)
     return {orders:(await all(db,orderSelect+" WHERE o.number IS NOT NULL ORDER BY o.number DESC")).map(toView)};
@@ -333,7 +318,7 @@ async function dispatch(request,env,path) {
     check(body && typeof body==="object" && !Array.isArray(body),"입력값을 확인해 주세요.");
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
-  if(path==="/api/menu" && !body)return {menu:await catalog(db,true),mode:"demo",clientKey:""};
+  if(path==="/api/menu" && !body)return {menu:await catalog(db,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:""};
   const token=request.headers.get("X-Kiosk-Session");
   check(validKey(token),"고객 세션을 확인해 주세요.",401);
   const customer=await digest(token);

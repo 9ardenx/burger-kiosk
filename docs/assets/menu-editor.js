@@ -4,7 +4,7 @@ import {escapeText} from "./common.js";
 import {labels,menuPicture} from "./catalog.js";
 import {jpegForUpload,photoPosition} from "./menu-photo.js";
 function categoryOptions(selected) {
-  return Object.entries(labels).map(([id,label])=>`<option value="${id}" ${selected===id?"selected":""}>${label}</option>`).join("");
+  return Object.entries(labels).map(([id,label])=>`<option value="${escapeText(id)}" ${selected===id?"selected":""}>${escapeText(label)}</option>`).join("");
 }
 function optionRow(option={}, groups=[]) {
   return `<div class="option-edit" data-option-id="${option.id??""}">
@@ -16,7 +16,7 @@ function optionRow(option={}, groups=[]) {
 }
 function editorHtml(item) {
   const create=!item;
-  item??={category:"burger",options:[],name:"",description:"",base_price:"",is_sold_out:0};
+  item??={category:Object.keys(labels)[0],options:[],name:"",description:"",base_price:"",is_sold_out:0};
   return `<div class="heading split"><h1>${create?"메뉴 등록":"메뉴 수정"}</h1><button class="secondary" data-back-menu>목록으로</button></div>
   <form id="menu-editor" class="panel catalog-editor">
     <div class="photo-editor"><img id="photo-preview" alt="메뉴 이미지 미리보기" src="${menuPicture(item)}">

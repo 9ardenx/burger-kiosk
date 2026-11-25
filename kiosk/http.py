@@ -1,5 +1,4 @@
 """Loopback HTTP entry points for the kiosk and store console."""
-import hmac
 import json
 import mimetypes
 import re
@@ -13,6 +12,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import orders, payments
+from . import admin_auth
+from .categories import category_state, save_categories
 from .menu_admin import save_listing
 from .store import Problem, connection, edit_menu, menu_list, menu_order_state, reorder_menu
 
@@ -44,9 +45,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def require_admin(self):
         with self.server.session_lock:
-            until = self.server.sessions.get(self.admin_cookie, 0)
+            until, revision = self.server.sessions.get(self.admin_cookie, (0, -1))
         if until <= time.monotonic():
             raise Problem("관리자 로그인이 필요합니다.", 401)
+        with connection(self.server.db_path) as db:
+            if admin_auth.auth_state(db)['revision'] != revision:
+                raise Problem('관리자 로그인이 필요합니다.', 401)
 
     def request_data(self):
         if self.headers.get_content_type() != "application/json":
@@ -67,29 +71,41 @@ class Handler(BaseHTTPRequestHandler):
         server = self.server
         if route == "/api/menu" and data is None:
             with connection(server.db_path) as db:
-                return {"menu": menu_list(db, all_items=True), "mode": server.gateway.mode, "clientKey": server.gateway.client_key}
+                return {"menu": menu_list(db, all_items=True), "categories": category_state(db)['items'], "mode": server.gateway.mode, "clientKey": server.gateway.client_key}
         if route == "/api/admin/login" and data is not None:
-            password = data.get("password")
-            if not isinstance(password, str) or not hmac.compare_digest(password.encode(), server.password.encode()):
-                raise Problem("관리자 암호를 확인해 주세요.", 401)
+            revision = admin_auth.login(server.db_path, server.password, data.get('password'))
             token = secrets.token_urlsafe(32)
             with server.session_lock:
                 now = time.monotonic()
-                server.sessions = {k:v for k,v in server.sessions.items() if v>now}
+                server.sessions = {k:v for k,v in server.sessions.items() if v[0]>now}
                 server.sessions.pop(self.admin_cookie, None)
-                server.sessions[token] = now + 8 * 3600
+                server.sessions[token] = (now + 8 * 3600, revision)
             self.cookie("admin_session", token)
             return {"ok": True}
+        if route == '/api/admin/reset-password' and data is not None:
+            result = admin_auth.reset_password(server.db_path, data)
+            self.cookie('admin_session', '', clear=True)
+            return result
         if route.startswith("/api/admin/"):
             self.require_admin()
+            if route == '/api/admin/password' and data is not None:
+                result = admin_auth.change_password(server.db_path, server.password, data)
+                self.cookie('admin_session', '', clear=True)
+                return result
+            if route == '/api/admin/recovery-code' and data is not None:
+                return admin_auth.issue_recovery(server.db_path, server.password, data)
             if route == "/api/admin/logout" and data is not None:
                 with server.session_lock:
                     server.sessions.pop(self.admin_cookie, None)
                 self.cookie("admin_session", "", clear=True)
                 return {"ok": True}
             with connection(server.db_path, write=data is not None) as db:
+                if route == '/api/admin/security' and data is None:
+                    return admin_auth.security_info(db)
+                if route == '/api/admin/categories':
+                    return save_categories(db, data) if data is not None else category_state(db)
                 if route == "/api/admin/menu" and data is None:
-                    return {"menu": menu_list(db, all_items=True), "order_revision": menu_order_state(db)["revision"]}
+                    return {"menu": menu_list(db, all_items=True), "order_revision": menu_order_state(db)["revision"], 'categories': category_state(db)['items']}
                 if route == "/api/admin/menu-order" and data is not None:
                     return reorder_menu(db, data)
                 if route == "/api/admin/menu" and data is not None:

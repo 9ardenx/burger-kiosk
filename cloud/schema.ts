@@ -36,10 +36,21 @@ export const payments = sqliteTable("payment", {
   created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`)
 }, t => [index("payments_by_order").on(t.order_id), uniqueIndex("one_success").on(t.order_id).where(sql`status = 'SUCCESS'`)]);
 export const sessions = sqliteTable("admin_session", {
-  digest: text().primaryKey(), expires: integer().notNull()
+  digest: text().primaryKey(), expires: integer().notNull(), auth_revision: integer().notNull().default(0)
 });
 
 export const menuDisplayOrder = sqliteTable("menu_display_order", {
   id: integer().primaryKey(), menu_ids: text().notNull().default("[]"),
   revision: integer().notNull().default(0)
+});
+
+export const categoryCatalog = sqliteTable('category_catalog', {
+  id: integer().primaryKey(), items: text().notNull().default('[]'), revision: integer().notNull().default(0)
+});
+export const adminAuth = sqliteTable('admin_auth', {
+  id: integer().primaryKey(), password_hash: text(), salt: text(), iterations: integer().notNull().default(100000),
+  revision: integer().notNull().default(0), recovery_hash: text(), changed_at: text()
+});
+export const authAttempt = sqliteTable('auth_attempt', {
+  key: text().primaryKey(), count: integer().notNull().default(0), expires: integer().notNull()
 });

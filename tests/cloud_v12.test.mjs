@@ -8,7 +8,7 @@ import {handleKiosk} from '../cloud/api.mjs';
 // Exercise the real Worker routes and SQL with an in-memory SQLite D1 adapter.
 async function setup(t) {
   const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
-  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql'])
+  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql'])
     sqlite.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
   const DB={prepare(sql){
     const make=args=>({sql,bind:(...values)=>make(values),
@@ -32,7 +32,7 @@ async function setup(t) {
   const menu=(await call('/api/menu')).data.menu;
   async function create(){const item=menu[0];const result=await call('/api/orders',{key:randomUUID(),items:[{menu_id:item.id,quantity:1,options:[],expected_unit:item.base_price,expected_version:item.version}]});assert.equal(result.status,200);return result.data;}
   const pay=(id,result='success')=>call(`/api/orders/${id}/attempts`,{key:randomUUID(),demo_result:result});
-  return {sqlite,call,menu,create,pay};
+  return {sqlite,call,menu,create,pay,setBearer:value=>bearer=value,getBearer:()=>bearer,password};
 }
 
 test('Worker persists full menu order and rejects stale, missing or duplicate IDs',async t=>{
@@ -114,4 +114,69 @@ test('Worker kitchen progression racing cancellation has one accepted transition
   const {call,create,pay}=await setup(t),o=await create();await pay(o.id);
   const outcomes=await Promise.all([call(`/api/admin/orders/${o.id}/cancel`,{expected:'PAID',reason:'재료 소진'}),call('/api/admin/orders/'+o.id,{expected:'PAID'})]);
   assert.deepEqual(outcomes.map(r=>r.status).sort(),[200,409]);
+});
+
+test('v1.4 categories rename/reorder without altering menus; protect used and stale categories',async t=>{
+  const {call,menu}=await setup(t),state=(await call('/api/admin/categories')).data;
+  const items=state.items.toReversed().map(c=>({...c}));items[0].name='시원한 음료';items.push({id:'dessert',name:'디저트'});
+  assert.equal((await call('/api/admin/categories',{items,revision:0})).status,200);
+  assert.deepEqual((await call('/api/menu')).data.menu,menu);assert.deepEqual((await call('/api/menu')).data.categories,items);
+  assert.equal((await call('/api/admin/categories',{items,revision:0})).status,409);
+  assert.equal((await call('/api/admin/categories',{items:items.filter(c=>c.id!=='burger'),revision:1})).status,409);
+  assert.equal((await call('/api/admin/categories',{items:[...items,{id:'all',name:'전체'}],revision:1})).status,400);
+  assert.equal((await call('/api/admin/categories',{items:items.filter(c=>c.id!=='dessert'),revision:1})).status,200);
+});
+
+test('v1.4 category removal racing menu creation cannot leave an orphan',async t=>{
+  const {call}=await setup(t),initial=(await call('/api/admin/categories')).data.items;
+  await call('/api/admin/categories',{items:[...initial,{id:'dessert',name:'디저트'}],revision:0});
+  const results=await Promise.all([call('/api/admin/menu',{key:randomUUID(),name:'아이스크림',description:'',category:'dessert',base_price:2500,is_sold_out:false,options:[]}),call('/api/admin/categories',{items:initial,revision:1})]);
+  assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
+  const catalog=(await call('/api/menu')).data;const ids=new Set(catalog.categories.map(c=>c.id));assert.ok(catalog.menu.every(m=>ids.has(m.category)));
+});
+
+test('v1.4 category validation failure cannot deactivate existing options',async t=>{
+  const {call,menu}=await setup(t),item=menu[0];
+  assert.equal((await call('/api/admin/menu/'+item.id,{...item,is_sold_out:false,category:'missing',options:[]})).status,409);
+  assert.deepEqual((await call('/api/admin/menu')).data.menu,menu);
+});
+
+test('v1.4 password change rejects wrong current password, revokes sessions and disables bootstrap',async t=>{
+  const {call,password,sqlite,setBearer}=await setup(t),next='new long password 2026';
+  const body={current_password:password,new_password:next,confirm_password:next};
+  assert.equal((await call('/api/admin/password',{...body,current_password:'wrong'})).status,400);
+  assert.equal((await call('/api/admin/menu')).status,200);
+  assert.equal((await call('/api/admin/password',body)).status,200);
+  assert.equal((await call('/api/admin/menu')).status,401);
+  assert.equal((await call('/api/admin/login',{password})).status,401);
+  const login=await call('/api/admin/login',{password:next});assert.equal(login.status,200);setBearer(login.data.token);
+  assert.equal((await call('/api/admin/menu')).status,200);
+  const stored=sqlite.prepare('SELECT * FROM admin_auth').get();assert.notEqual(stored.password_hash,next);assert.ok(stored.salt);assert.equal(stored.revision,1);
+});
+
+test('v1.4 recovery code rotation, one-use reset and no automatic login',async t=>{
+  const {call,password,setBearer,sqlite}=await setup(t),next='recovered password 2026';
+  const first=(await call('/api/admin/recovery-code',{current_password:password})).data.code;
+  const second=(await call('/api/admin/recovery-code',{current_password:password})).data.code;
+  assert.notEqual(sqlite.prepare('SELECT recovery_hash FROM admin_auth').get().recovery_hash,second.replaceAll('-',''));
+  assert.equal((await call('/api/admin/reset-password',{recovery_code:first,new_password:next,confirm_password:next})).status,400);
+  assert.equal((await call('/api/admin/reset-password',{recovery_code:second,new_password:next,confirm_password:next})).status,200);
+  assert.equal((await call('/api/admin/menu')).status,401);
+  assert.equal((await call('/api/admin/reset-password',{recovery_code:second,new_password:next,confirm_password:next})).status,400);
+  setBearer((await call('/api/admin/login',{password:next})).data.token);
+  assert.equal((await call('/api/admin/security')).data.recovery_ready,false);
+});
+
+test('v1.4 repeated wrong passwords are throttled and expire',async t=>{
+  const {call,password,sqlite}=await setup(t);
+  for(let i=0;i<10;i++)assert.equal((await call('/api/admin/login',{password:'wrong'})).status,401);
+  assert.equal((await call('/api/admin/login',{password})).status,429);
+  sqlite.exec('UPDATE auth_attempt SET expires=0');assert.equal((await call('/api/admin/login',{password})).status,200);
+});
+
+test('v1.4 concurrent recovery consumes its code once',async t=>{
+  const {call,password}=await setup(t),code=(await call('/api/admin/recovery-code',{current_password:password})).data.code;
+  const body={recovery_code:code,new_password:'concurrent reset 2026',confirm_password:'concurrent reset 2026'};
+  const results=await Promise.all([call('/api/admin/reset-password',body),call('/api/admin/reset-password',body)]);
+  assert.equal(results.filter(r=>r.status===200).length,1);assert.equal(results.filter(r=>[400,409].includes(r.status)).length,1);
 });
