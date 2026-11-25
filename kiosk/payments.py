@@ -82,6 +82,9 @@ def begin(db, gateway, order_id, customer, data):
                          WHERE order_item.order_id=? AND menu.is_sold_out=1 LIMIT 1""", (order_id,)).fetchone()
     if sold:
         raise Problem(f"{sold['name']} 품절 · 장바구니를 수정해 주세요.", 409, "CART_CHANGED")
+    if gateway.mode != 'demo' and db.execute('''SELECT 1 FROM inventory s JOIN order_item i ON i.menu_id=s.menu_id
+            WHERE i.order_id=? AND s.enabled=1''', (order_id,)).fetchone():
+        raise Problem('수량 관리 메뉴는 현재 모의 결제에서만 주문할 수 있습니다. PG 재고 예약 연동이 필요합니다.', 409, 'PG_INVENTORY_UNSUPPORTED')
     attempt_id = uuid4().hex
     db.execute("INSERT INTO payment(id,order_id,request_key,mode,amount,status) VALUES(?,?,?,?,?,'PENDING')",
                (attempt_id, order_id, key, gateway.mode, row["total_amount"]))

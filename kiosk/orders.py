@@ -5,6 +5,7 @@ from uuid import uuid4
 
 from .variants import resolve_choices
 from .store import Problem, identifier, integer
+from .inventory import check_stock
 
 NEXT_STATE = {"PAID": "PREPARING", "PREPARING": "READY", "READY": "COMPLETED"}
 
@@ -30,7 +31,7 @@ def order_view(db, row):
     return {"id": row["id"], "number": row["number"], "status": "CANCELLED" if row["cancelled_at"] else row["status"], "total": row["total_amount"],
             "created_at": row["created_at"], "cancelled_at": row["cancelled_at"],
             "cancelled_by": row["cancelled_by"], "cancel_reason": row["cancel_reason"], "dining_type": row['dining_type'],
-            "items": items, "payment": dict(payment) if payment else None}
+            "restock_on_cancel": row['restock_on_cancel'], "items": items, "payment": dict(payment) if payment else None}
 
 
 def quote_item(db, line):
@@ -77,6 +78,7 @@ def create_order(db, customer, data):
             raise Problem("장바구니가 바뀌었습니다. 주문을 다시 확인해 주세요.", 409)
         return order_view(db, previous)
     lines = [quote_item(db, line) for line in cart]
+    check_stock(db, cart)
     total = sum(quantity * unit for _, _, _, quantity, unit in lines)
     order_id = uuid4().hex
     db.execute("INSERT INTO orders(id,customer,request_key,cart_signature,total_amount,dining_type) VALUES(?,?,?,?,?,?)",
@@ -112,6 +114,9 @@ def cancel_unpaid(db, order_id, customer):
 
 
 def cancel_by_admin(db, order_id, data):
+    restock = data.get('restock', data.get('expected') == 'PAID')
+    if type(restock) is not bool:
+        raise Problem('재고 복원 여부를 선택해 주세요.')
     reason = data.get("reason")
     if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 200:
         raise Problem("취소 사유를 1~200자로 입력해 주세요.")
@@ -129,6 +134,6 @@ def cancel_by_admin(db, order_id, data):
     unsafe = db.execute("SELECT 1 FROM payment WHERE order_id=? AND (mode!='demo' OR status='PENDING')", (order_id,)).fetchone()
     if not approved or unsafe:
         raise Problem("PG 결제는 환불 연동 후 취소할 수 있습니다. 현재 직권취소는 모의 결제 주문만 지원합니다.", 409, "REFUND_REQUIRED")
-    db.execute("UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='admin',cancel_reason=? WHERE id=?",
-               (reason.strip(), order_id))
+    db.execute("UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='admin',cancel_reason=?,restock_on_cancel=? WHERE id=?",
+               (reason.strip(), restock, order_id))
     return order_view(db, db.execute("SELECT * FROM orders WHERE id=?", (order_id,)).fetchone())

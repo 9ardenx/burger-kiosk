@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS orders (
     id TEXT PRIMARY KEY, customer TEXT NOT NULL, request_key TEXT NOT NULL,
     cart_signature TEXT NOT NULL, total_amount INTEGER NOT NULL,
     number INTEGER UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, cancelled_at TEXT,
-    cancelled_by TEXT, cancel_reason TEXT, dining_type TEXT,
+    cancelled_by TEXT, cancel_reason TEXT, dining_type TEXT, restock_on_cancel INTEGER,
     status TEXT NOT NULL DEFAULT 'PENDING_PAYMENT'
         CHECK(status IN ('PENDING_PAYMENT','PAID','PREPARING','READY','COMPLETED')),
     UNIQUE(customer, request_key)
@@ -40,6 +40,18 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_paid_payment ON payment(order_id) WHERE st
 CREATE INDEX IF NOT EXISTS order_items_by_order ON order_item(order_id);
 CREATE INDEX IF NOT EXISTS options_by_item ON order_item_option(order_item_id);
 CREATE INDEX IF NOT EXISTS payments_by_order ON payment(order_id);
+
+CREATE TABLE IF NOT EXISTS inventory (
+    menu_id INTEGER PRIMARY KEY REFERENCES menu(id), enabled INTEGER NOT NULL DEFAULT 0 CHECK(enabled IN (0,1)),
+    quantity INTEGER NOT NULL DEFAULT 0 CHECK(quantity>=0), low_threshold INTEGER NOT NULL DEFAULT 5 CHECK(low_threshold>=0),
+    revision INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS inventory_movement (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, menu_id INTEGER NOT NULL REFERENCES menu(id), order_id TEXT REFERENCES orders(id),
+    kind TEXT NOT NULL, delta INTEGER NOT NULL, before_quantity INTEGER NOT NULL, after_quantity INTEGER NOT NULL,
+    reason TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS inventory_order_movement ON inventory_movement(order_id,menu_id,kind);
 
 CREATE TABLE IF NOT EXISTS menu_photo (key TEXT PRIMARY KEY, content BLOB NOT NULL);
 

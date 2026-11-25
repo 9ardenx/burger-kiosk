@@ -5,10 +5,101 @@ import {readFileSync} from 'node:fs';
 import {createHash, randomUUID} from 'node:crypto';
 import {handleKiosk} from '../cloud/api.mjs';
 
+test('v1.6 additive migration preserves v1.5 menu, photo, option, ad and paid order snapshots',t=>{
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql'])db.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
+  db.exec(`INSERT INTO menu(id,name,description,kind,base_price,photo_key,version) VALUES(1,'기존 메뉴','유지','custom',5500,'original-photo-hash',8);
+    INSERT INTO menu_option(id,menu_id,name,extra_price) VALUES(1,1,'치즈',500);
+    INSERT INTO orders(id,customer,signature,total,creation_tag,status,number,dining_type) VALUES('legacy','customer','signature',6000,'old','PAID',11,'TAKEOUT');
+    INSERT INTO order_item(id,order_id,menu_id,name,quantity,price) VALUES('item','legacy',1,'기존 메뉴',1,5500);
+    INSERT INTO order_item_option(id,item_id,option_id,name,option_price) VALUES('opt','item',1,'치즈',500);
+    INSERT INTO payment(id,order_id,amount,status) VALUES('payment','legacy',6000,'SUCCESS');
+    INSERT INTO ad_catalog(id,items,revision) VALUES(1,'[{"title":"기존 광고"}]',4);`);
+  const tables=['menu','menu_option','orders','order_item','order_item_option','payment','ad_catalog'];
+  const before=Object.fromEntries(tables.map(name=>[name,db.prepare('SELECT * FROM '+name).all()]));
+  for(const file of ['v16-migration.sql','inventory-triggers.sql'])db.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
+  for(const name of tables){const now=db.prepare('SELECT * FROM '+name).all();for(let i=0;i<before[name].length;i++)for(const [k,v] of Object.entries(before[name][i]))assert.deepEqual(now[i][k],v);}
+  assert.equal(db.prepare('SELECT restock_on_cancel FROM orders').get().restock_on_cancel,null);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM inventory').get().n,0);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM inventory_movement').get().n,0);
+});
+
+test('v1.6 final unit is sold once across concurrent payments and retries',async t=>{
+  const {call,create,pay,sqlite}=await setup(t);
+  assert.equal((await call('/api/admin/inventory/1',{enabled:true,quantity:1,low_threshold:2,revision:0,reason:'입고'})).status,200);
+  const orders=await Promise.all([create(),create()]);
+  const results=await Promise.all(orders.map(o=>pay(o.id)));assert.deepEqual(results.map(r=>r.status).sort(),[200,409]);
+  const paid=results.find(r=>r.status===200).data;assert.equal((await pay(paid.id)).status,200);
+  assert.equal(sqlite.prepare('SELECT quantity FROM inventory').get().quantity,0);
+  assert.equal(sqlite.prepare("SELECT count(*) AS n FROM inventory_movement WHERE kind='SALE'").get().n,1);
+  assert.equal(sqlite.prepare("SELECT count(*) AS n FROM payment WHERE status='SUCCESS'").get().n,1);
+  assert.equal((await call('/api/menu')).data.menu[0].is_sold_out,1);
+  assert.equal((await call('/api/admin/menu')).data.menu[0].is_sold_out,0);
+});
+test('v1.6 aggregate quantities and all-or-nothing stock deduction prevent partial approval',async t=>{
+  const {call,pay,sqlite}=await setup(t);
+  for(const id of [1,2])await call('/api/admin/inventory/'+id,{enabled:true,quantity:2,low_threshold:1,revision:0,reason:'입고'});
+  const line={menu_id:1,quantity:2,options:[],expected_unit:5500};
+  assert.equal((await call('/api/orders',{key:randomUUID(),items:[line,line]})).status,409);
+  const order=(await call('/api/orders',{key:randomUUID(),items:[line,{...line,menu_id:2,expected_unit:6000}]})).data;
+  await call('/api/admin/inventory/2',{enabled:true,quantity:1,low_threshold:1,revision:1,reason:'실사'});
+  assert.equal((await pay(order.id)).status,409);
+  assert.deepEqual(sqlite.prepare('SELECT quantity FROM inventory ORDER BY menu_id').all().map(r=>r.quantity),[2,1]);
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM payment').get().n,0);
+});
+test('v1.6 failed and historical untracked orders do not affect stock; cancel restores once',async t=>{
+  const {call,create,pay,sqlite}=await setup(t),legacy=await create();await pay(legacy.id);
+  await call('/api/admin/inventory/1',{enabled:true,quantity:3,low_threshold:2,revision:0,reason:'관리 시작'});
+  await call('/api/admin/orders/'+legacy.id+'/cancel',{expected:'PAID',reason:'과거 주문',restock:true});
+  const failed=await create();await pay(failed.id,'failure');await call('/api/orders/'+failed.id+'/cancel',{});
+  assert.equal(sqlite.prepare('SELECT quantity FROM inventory').get().quantity,3);
+  const order=await create();await pay(order.id);
+  const payload={expected:'PAID',reason:'중복 취소',restock:true};
+  const cancelled=await Promise.all([call('/api/admin/orders/'+order.id+'/cancel',payload),call('/api/admin/orders/'+order.id+'/cancel',payload)]);
+  assert.ok(cancelled.every(r=>r.status===200));assert.equal(sqlite.prepare('SELECT quantity FROM inventory').get().quantity,3);
+  assert.equal(sqlite.prepare("SELECT count(*) AS n FROM inventory_movement WHERE kind='RETURN'").get().n,1);
+  const cooked=await create();await pay(cooked.id);await call('/api/admin/orders/'+cooked.id,{expected:'PAID'});
+  await call('/api/admin/orders/'+cooked.id+'/cancel',{expected:'PREPARING',reason:'폐기',restock:false});
+  assert.equal(sqlite.prepare('SELECT quantity FROM inventory').get().quantity,2);
+});
+test('v1.6 inventory permissions, conflict, bad input and manual sold-out remain independent',async t=>{
+  const {call,create,pay,sqlite}=await setup(t),body={enabled:true,quantity:2,low_threshold:1,revision:0,reason:'입고'};
+  assert.equal((await call('/api/admin/inventory',undefined,undefined,false)).status,401);
+  assert.equal((await call('/api/admin/inventory/1',body,undefined,false)).status,401);
+  const changes=await Promise.all([call('/api/admin/inventory/1',body),call('/api/admin/inventory/1',body)]);assert.deepEqual(changes.map(r=>r.status).sort(),[200,409]);
+  await pay((await create()).id);
+  assert.equal((await call('/api/admin/inventory/1',{...body,revision:1,quantity:99})).status,409);
+  for(const quantity of [-1,1.5,true,1000001])assert.equal((await call('/api/admin/inventory/1',{...body,quantity,revision:2})).status,400);
+  sqlite.exec('UPDATE menu SET is_sold_out=1 WHERE id=1');
+  assert.equal((await call('/api/admin/inventory/1',{...body,quantity:10,revision:2})).status,200);
+  assert.equal((await call('/api/menu')).data.menu[0].is_sold_out,1);
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM inventory_movement').get().n,3);
+});
+test('v1.6 sales use Korean event dates, immutable option prices and cross-period cancellations',async t=>{
+  const {call,create,pay,sqlite}=await setup(t);
+  const order=(await call('/api/orders',{key:randomUUID(),dining_type:'TAKEOUT',items:[{menu_id:1,quantity:2,options:[1],expected_unit:6000}]})).data;
+  await pay(order.id);await pay((await create()).id,'failure');await create();
+  sqlite.prepare("UPDATE payment SET created_at='2026-11-25 15:00:00' WHERE order_id=?").run(order.id);
+  sqlite.exec('UPDATE menu SET base_price=9900 WHERE id=1');
+  await call('/api/admin/orders/'+order.id+'/cancel',{expected:'PAID',reason:'취소'});
+  sqlite.prepare("UPDATE orders SET cancelled_at='2026-11-26 15:00:00' WHERE id=?").run(order.id);
+  const first=(await call('/api/admin/sales?from=2026-11-26&to=2026-11-26')).data;
+  assert.deepEqual([first.summary.approved,first.summary.cancelled,first.summary.orders],[12000,0,1]);assert.equal(first.menus[0].net,12000);assert.equal(first.dining[1].net,12000);
+  const next=(await call('/api/admin/sales?from=2026-11-27&to=2026-11-27')).data;assert.equal(next.summary.net,-12000);assert.equal(next.summary.returned_quantity,2);
+  const both=(await call('/api/admin/sales?from=2026-11-26&to=2026-11-27')).data;assert.equal(both.summary.net,0);assert.equal(both.menus[0].net,0);
+});
+test('v1.6 sales protect private data and reject invalid and oversized ranges',async t=>{
+  const {call}=await setup(t);
+  assert.equal((await call('/api/admin/sales?from=2026-11-26&to=2026-11-26',undefined,undefined,false)).status,401);
+  for(const query of ['','?from=2026-02-30&to=2026-03-01','?from=2026-11-27&to=2026-11-26','?from=2025-01-01&to=2026-01-02'])assert.equal((await call('/api/admin/sales'+query)).status,400);
+  const empty=(await call('/api/admin/sales?from=2026-11-26&to=2026-11-26')).data;
+  assert.equal(empty.summary.net,0);assert.deepEqual(empty.menus,[]);assert.equal(empty.daily.length,1);
+});
+
 // Exercise the real Worker routes and SQL with an in-memory SQLite D1 adapter.
 async function setup(t) {
   const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
-  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql'])
+  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql'])
     sqlite.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
   const DB={prepare(sql){
     const make=args=>({sql,bind:(...values)=>make(values),

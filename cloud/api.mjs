@@ -4,6 +4,8 @@ import {Problem,check} from './problems.mjs';
 import {categoryState,saveCategories,DEFAULT_CATEGORY_JSON,CATEGORY_EXISTS} from './categories.mjs';
 import {loginAdmin,requireAdmin,securityInfo,changePassword,issueRecovery,resetPassword} from './admin-auth.mjs';
 import {adState,saveAds} from './advertising.mjs';
+import {inventoryState,saveInventory,checkStock} from './inventory.mjs';
+import {salesReport} from './sales.mjs';
 
 const FRONTEND = "https://9ardenx.github.io";
 const NEXT = Object.freeze({PAID:"PREPARING", PREPARING:"READY", READY:"COMPLETED"});
@@ -19,7 +21,7 @@ async function digest(value) {
 const statement = (db, sql, ...args) => db.prepare(sql).bind(...args);
 const all = async (db, sql, ...args) => (await statement(db,sql,...args).all()).results;
 
-async function catalog(db, includeSold=false) {
+async function catalog(db, includeSold=false, publicView=false) {
   if (!await db.prepare("SELECT id FROM menu LIMIT 1").first()) {
     await db.batch([
       db.prepare(`INSERT OR IGNORE INTO menu(id,name,description,kind,base_price) VALUES
@@ -36,18 +38,22 @@ async function catalog(db, includeSold=false) {
         JSON.stringify(sodaGroups.map(g=>({...g,when_extra:'탄산음료 감자튀김'}))))
     ]);
   }
-  const [menus,options,displayOrder]=await db.batch([
+  const [menus,options,displayOrder,stock]=await db.batch([
     db.prepare("SELECT id,name,description,kind,base_price,is_sold_out,version,category,photo_key,choice_groups FROM menu " + (includeSold?"":"WHERE is_sold_out=0 ") + "ORDER BY id"),
     db.prepare("SELECT id,menu_id,name,extra_price FROM menu_option WHERE active=1 ORDER BY id"),
-    db.prepare("SELECT menu_ids,revision FROM menu_display_order WHERE id=1")
+    db.prepare("SELECT menu_ids,revision FROM menu_display_order WHERE id=1"),
+    db.prepare('SELECT menu_id FROM inventory WHERE enabled=1 AND quantity=0')
   ]);
   const positions=new Map(JSON.parse(displayOrder.results[0]?.menu_ids??"[]").map((id,i)=>[id,i]));
-  return menus.results.map(menu=>({...menu, choice_groups:JSON.parse(menu.choice_groups), options:options.results.filter(o=>o.menu_id===menu.id)}))
+  const exhausted=new Set(stock.results.map(s=>s.menu_id));
+  return menus.results.map(menu=>({...menu,stock_sold_out:exhausted.has(menu.id),
+    is_sold_out:publicView?Number(Boolean(menu.is_sold_out||exhausted.has(menu.id))):menu.is_sold_out,
+    choice_groups:JSON.parse(menu.choice_groups), options:options.results.filter(o=>o.menu_id===menu.id)}))
     .sort((a,b)=>(positions.get(a.id)??positions.size)-(positions.get(b.id)??positions.size)||a.id-b.id);
 }
 
 const orderSelect = `SELECT o.id,o.number,CASE WHEN o.cancelled_at IS NOT NULL THEN 'CANCELLED' ELSE o.status END AS status,o.total,o.created_at,
-  o.cancelled_at,o.cancelled_by,o.cancel_reason,o.dining_type,
+  o.cancelled_at,o.cancelled_by,o.cancel_reason,o.dining_type,o.restock_on_cancel,
   (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,'variants',json(i.choice_snapshot),
     'options',json((SELECT json_group_array(json_object('name',x.name,'option_price',x.option_price))
       FROM order_item_option x WHERE x.item_id=i.id)))) FROM order_item i WHERE i.order_id=o.id) AS items,
@@ -92,6 +98,7 @@ async function createOrder(db,customer,body) {
     total+=unit*line.quantity;
     return {menu,options,snapshot:selection.snapshot,quantity:line.quantity};
   });
+  await checkStock(db,cart);
   const tag=crypto.randomUUID();
   const menuVersions=[...new Map(lines.map(l=>[l.menu.id,l.menu.version]))];
   const versionChecks=menuVersions.map(()=>"(id=? AND version=?)").join(" OR ");
@@ -147,15 +154,17 @@ async function cancelUnpaid(db,customer,id) {
 }
 
 async function cancelByAdmin(db,id,body) {
+  const restock=Object.hasOwn(body,'restock')?body.restock:(body.expected==='PAID');
+  check(typeof restock==='boolean','재고 복원 여부를 선택해 주세요.');
   check(typeof body.reason==='string' && body.reason.trim().length>=1 && body.reason.trim().length<=200,
     '취소 사유를 1~200자로 입력해 주세요.');
   check(Object.hasOwn(NEXT,body.expected),'수령 전 주문만 직권취소할 수 있습니다.',409,'ORDER_CHANGED');
   // One conditional write arbitrates cancel vs. kitchen progression; approval history remains intact.
-  const result=await statement(db,`UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='admin',cancel_reason=?
+  const result=await statement(db,`UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='admin',cancel_reason=?,restock_on_cancel=?
     WHERE id=? AND status=? AND cancelled_at IS NULL
     AND EXISTS(SELECT 1 FROM payment WHERE order_id=? AND status='SUCCESS' AND mode='demo')
     AND NOT EXISTS(SELECT 1 FROM payment WHERE order_id=? AND (mode!='demo' OR status='PENDING'))`,
-    body.reason.trim(),id,body.expected,id,id).run();
+    body.reason.trim(),Number(restock),id,body.expected,id,id).run();
   const row=await statement(db,orderSelect+' WHERE o.id=?',id).first();
   check(row,'주문을 찾을 수 없습니다.',404);
   if(result.meta.changes || (row.cancelled_at && row.cancelled_by==='admin'))return {order:toView(row)};
@@ -271,6 +280,10 @@ async function adminRoute(db,env,path,request,body) {
   if(path==='/api/admin/login'&&body)return loginAdmin(db,env,request,body);
   if(path==='/api/admin/reset-password'&&body)return resetPassword(db,request,body);
   const hash=await requireAdmin(db,request);
+  if(path==='/api/admin/sales'&&!body)return salesReport(db,new URL(request.url).searchParams);
+  if(path==='/api/admin/inventory'&&!body)return inventoryState(db);
+  const inventoryMatch=path.match(/^\/api\/admin\/inventory\/(\d+)$/);
+  if(inventoryMatch&&body)return saveInventory(db,Number(inventoryMatch[1]),body);
   if(path==='/api/admin/ads')return body?saveAds(db,env.BUCKET,body):adState(db);
   if(path==='/api/admin/security'&&!body)return securityInfo(db);
   if(path==='/api/admin/password'&&body)return changePassword(db,env,request,body);
@@ -323,7 +336,7 @@ async function dispatch(request,env,path) {
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
   if(path==='/api/ads'&&!body)return adState(db,true);
-  if(path==="/api/menu" && !body)return {menu:await catalog(db,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:""};
+  if(path==="/api/menu" && !body)return {menu:await catalog(db,true,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:""};
   const token=request.headers.get("X-Kiosk-Session");
   check(validKey(token),"고객 세션을 확인해 주세요.",401);
   const customer=await digest(token);
@@ -355,6 +368,8 @@ async function handleKiosk(request,env) {
     return Response.json(await dispatch(request,env,path),{headers});
   }
   catch(e){
+    if((String(e?.message)+' '+String(e?.cause?.message)).includes('STOCK_UNAVAILABLE'))
+      return Response.json({error:'판매 가능 수량이 부족합니다. 최신 메뉴를 확인하고 장바구니 수량을 줄여 주세요.',code:'CART_CHANGED'},{status:409,headers});
     if(e instanceof Problem)return Response.json({error:e.message,code:e.code},{status:e.status,headers});
     console.error("Kiosk API database request failed",e?.name);
     return Response.json({error:"매장 서버에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요."},{status:503,headers});

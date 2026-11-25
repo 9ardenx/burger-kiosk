@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, uniqueIndex, index, check } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const menus = sqliteTable("menu", {
@@ -16,7 +16,7 @@ export const orders = sqliteTable("orders", {
   id: text().primaryKey(), customer: text().notNull(), signature: text().notNull(),
   total: integer().notNull(), status: text().notNull().default("PENDING_PAYMENT"),
   number: integer().unique(), created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`), cancelled_at: text(),
-  cancelled_by: text(), cancel_reason: text(), dining_type: text(),
+  cancelled_by: text(), cancel_reason: text(), dining_type: text(), restock_on_cancel: integer(),
   creation_tag: text().notNull()
 });
 export const items = sqliteTable("order_item", {
@@ -57,3 +57,14 @@ export const authAttempt = sqliteTable('auth_attempt', {
 export const adCatalog = sqliteTable('ad_catalog', {
   id: integer().primaryKey(), items: text().notNull().default('[]'), revision: integer().notNull().default(0)
 });
+
+export const inventory = sqliteTable('inventory', {
+  menu_id: integer().primaryKey().references(() => menus.id), enabled: integer().notNull().default(0),
+  quantity: integer().notNull().default(0), low_threshold: integer().notNull().default(5), revision: integer().notNull().default(0)
+},t=>[check('inventory_enabled',sql`${t.enabled} IN (0,1)`),check('inventory_quantity',sql`${t.quantity} >= 0`),check('inventory_threshold',sql`${t.low_threshold} >= 0`)]);
+export const inventoryMovement = sqliteTable('inventory_movement', {
+  id: integer().primaryKey({autoIncrement:true}), menu_id: integer().notNull().references(() => menus.id),
+  order_id: text().references(() => orders.id), kind: text().notNull(), delta: integer().notNull(),
+  before_quantity: integer().notNull(), after_quantity: integer().notNull(), reason: text().notNull(),
+  created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`)
+},t=>[uniqueIndex('inventory_order_movement').on(t.order_id,t.menu_id,t.kind)]);

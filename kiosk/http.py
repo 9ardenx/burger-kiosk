@@ -9,12 +9,14 @@ import time
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 from . import orders, payments
 from . import admin_auth
 from .categories import category_state, save_categories
 from .advertising import ad_state, save_ads
+from .inventory import inventory_state, save_inventory
+from .sales import sales_report
 from .menu_admin import save_listing
 from .store import Problem, connection, edit_menu, menu_list, menu_order_state, reorder_menu
 
@@ -74,7 +76,7 @@ class Handler(BaseHTTPRequestHandler):
             with connection(server.db_path) as db: return ad_state(db, public=True)
         if route == "/api/menu" and data is None:
             with connection(server.db_path) as db:
-                return {"menu": menu_list(db, all_items=True), "categories": category_state(db)['items'], "mode": server.gateway.mode, "clientKey": server.gateway.client_key}
+                return {"menu": menu_list(db, all_items=True, public=True), "categories": category_state(db)['items'], "mode": server.gateway.mode, "clientKey": server.gateway.client_key}
         if route == "/api/admin/login" and data is not None:
             revision = admin_auth.login(server.db_path, server.password, data.get('password'))
             token = secrets.token_urlsafe(32)
@@ -103,6 +105,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.cookie("admin_session", "", clear=True)
                 return {"ok": True}
             with connection(server.db_path, write=data is not None) as db:
+                if route == '/api/admin/sales' and data is None:
+                    query = parse_qs(urlsplit(self.path).query)
+                    return sales_report(db, query.get('from', [None])[0], query.get('to', [None])[0])
+                if route == '/api/admin/inventory' and data is None:
+                    return inventory_state(db)
+                match = re.fullmatch(r'/api/admin/inventory/(\d+)', route)
+                if match and data is not None:
+                    return save_inventory(db, int(match[1]), data)
                 if route == '/api/admin/ads':
                     return save_ads(db, data) if data is not None else ad_state(db)
                 if route == '/api/admin/security' and data is None:

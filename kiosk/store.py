@@ -32,7 +32,12 @@ def connection(path, *, write=False):
     try:
         db.execute("PRAGMA foreign_keys=ON")
         db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
-        yield db
+        try:
+            yield db
+        except sqlite3.IntegrityError as exc:
+            if 'STOCK_UNAVAILABLE' in str(exc):
+                raise Problem('판매 가능 수량이 부족합니다. 최신 메뉴를 확인하고 장바구니 수량을 줄여 주세요.', 409, 'CART_CHANGED') from exc
+            raise
         db.commit()
     finally:
         db.close()  # An unfinished transaction rolls back on close.
@@ -49,7 +54,7 @@ def initialize(path):
         for table, additions in (
             ("menu", {"category": "TEXT NOT NULL DEFAULT 'burger'", "photo_key": "TEXT", "registration_key": "TEXT", "choice_groups": "TEXT NOT NULL DEFAULT '[]'"}),
             ("order_item", {"choice_snapshot": "TEXT NOT NULL DEFAULT '[]'"}),
-            ("orders", {"cancelled_at": "TEXT", "cancelled_by": "TEXT", "cancel_reason": "TEXT", "dining_type": "TEXT"}),
+            ("orders", {"cancelled_at": "TEXT", "cancelled_by": "TEXT", "cancel_reason": "TEXT", "dining_type": "TEXT", "restock_on_cancel": "INTEGER"}),
             ("menu_option", {"active": "INTEGER NOT NULL DEFAULT 1"}),
         ):
             columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
@@ -96,10 +101,18 @@ def initialize(path):
                                (json.dumps(combo_groups, ensure_ascii=False), int(not empty), mid))
 
 
-def menu_list(db, *, all_items=False):
+    with closing(sqlite3.connect(path)) as db:
+        db.executescript((Path(__file__).resolve().parents[1] / 'cloud/inventory-triggers.sql').read_text(encoding='utf-8'))
+
+
+def menu_list(db, *, all_items=False, public=False):
     condition = "" if all_items else "WHERE is_sold_out=0"
     rows = [dict(row) for row in db.execute(f"SELECT id,name,description,kind,category,photo_key,base_price,is_sold_out,version,choice_groups FROM menu {condition} ORDER BY id")]
     for row in rows:
+        stock = db.execute('SELECT enabled,quantity FROM inventory WHERE menu_id=?', (row['id'],)).fetchone()
+        row['stock_sold_out'] = bool(stock and stock['enabled'] and stock['quantity'] == 0)
+        if public:
+            row['is_sold_out'] = int(row['is_sold_out'] or row['stock_sold_out'])
         row["choice_groups"] = json.loads(row["choice_groups"])
         row["options"] = [dict(option) for option in db.execute(
             "SELECT id,name,extra_price FROM menu_option WHERE menu_id=? AND active=1 ORDER BY id", (row["id"],)
