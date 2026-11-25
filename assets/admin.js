@@ -1,7 +1,8 @@
 import {handleVariantButton} from "./group-editor.js";
 import {editorHtml,editorData,optionRow} from "./menu-editor.js";
 import {jpegForUpload,photoPosition} from "./menu-photo.js";
-import {categoryName,menuPicture} from "./catalog.js";
+import {categoryName,menuPicture,setCategories} from "./catalog.js";
+import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js';
 import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
 
 const tabs=document.querySelector("#tabs");
@@ -10,6 +11,8 @@ const cancelDialog=document.querySelector('#admin-cancel-dialog');
 const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 완료"};
 let current="orders", orders=[], menu=[], busy=false, selected=null, filter="open", timer;
 let editor=null, previewUrl=null, previewSequence=0;
+let categoryDraft=[],categorySaved=[],categoryRevision=0,security=null;
+const categoriesDirty=()=>JSON.stringify(categoryDraft)!==JSON.stringify(categorySaved);
 let menuRevision=0, savedMenuIds=[], readSequence=0, orderEpoch=0, sessionEpoch=0;
 const pendingOrders=new Set();
 const orderDirty=()=>JSON.stringify(menu.map(m=>m.id))!==JSON.stringify(savedMenuIds);
@@ -30,15 +33,16 @@ async function refreshPhotoPreview(form) {
   }
 }
 function closeEditor(){resetPreview();editor=null;}
-function login() {
+function login(recovery=false) {
   cancelDialog.close();
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
   closeEditor();
   clearInterval(timer);
   tabs.hidden=true;
+  if(recovery){app.innerHTML=resetView();return;}
   app.innerHTML=`<div class="login panel"><h1>관리자 로그인</h1><p class="muted">매장 메뉴와 주문을 관리합니다.</p>
     <form id="login"><label>관리자 암호<input type="password" name="password" autocomplete="current-password" required></label>
-    <button class="primary wide">로그인</button></form></div>`;
+    <button class="primary wide">로그인</button></form><p><button type="button" class="text-btn" data-show-recovery>암호를 잊으셨나요?</button></p></div>`;
 }
 function menuView() {
 if(editor)return editorHtml(editor.item);
@@ -49,7 +53,7 @@ if(editor)return editorHtml(editor.item);
     <div class="actions"><button class="secondary" data-discard-order ${orderDirty()?"":"disabled"}>되돌리기</button><button class="primary" data-save-order ${orderDirty()?"":"disabled"}>순서 저장</button></div></div>
     <div class="admin-menus">
     ${menu.map((item,index)=>`<article class="panel catalog-card" data-menu-id="${item.id}"><img src="${menuPicture(item)}" alt="">
-      <div><small>${index+1}번째 · ${categoryName(item.category)} · ${item.is_sold_out?"품절":"판매 중"}</small><h2>${escapeText(item.name)}</h2>
+      <div><small>${index+1}번째 · ${escapeText(categoryName(item.category))} · ${item.is_sold_out?"품절":"판매 중"}</small><h2>${escapeText(item.name)}</h2>
       <strong>${money(item.base_price)}</strong></div><div class="catalog-actions"><button class="secondary" data-edit-menu="${item.id}" ${orderDirty()?"disabled":""} aria-label="${escapeText(item.name)} 수정">수정</button>
       <button class="${item.is_sold_out?'secondary':'danger-outline'}" data-toggle-stock="${item.id}" ${orderDirty()?"disabled":""} aria-label="${escapeText(item.name)} ${item.is_sold_out?'판매 재개':'품절 처리'}">${item.is_sold_out?'판매 재개':'품절 처리'}</button></div>
       <div class="menu-position"><button class="secondary" data-move-menu="${item.id}" data-direction="-1" ${index===0?"disabled":""} aria-label="${escapeText(item.name)} 앞으로 이동">앞으로</button>
@@ -95,14 +99,20 @@ function patchOrders() {
 }
 function render() {
   tabs.hidden=false;
-  tabs.innerHTML=`<button data-tab="orders" aria-pressed="${current==="orders"}">주문 현황</button><button data-tab="menu" aria-pressed="${current==="menu"}">메뉴 관리</button><button class="logout" data-act="logout">로그아웃</button>`;
-  app.innerHTML=current==="menu"?menuView():ordersView();
+  tabs.innerHTML=Object.entries({orders:'주문 현황',menu:'메뉴 관리',categories:'분류 관리',security:'암호 관리'}).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
+  app.innerHTML=current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
   if(current==="orders")patchOrders();
   setRequestState(busy);
 }
 async function refresh() {
   if(current==="orders"){await refreshOrders();if(!document.querySelector("#order-rows"))render();return;}
+  if(current==='security'){security=await api('/api/admin/security');render();return;}
+  if(current==='categories'){
+    const [state,catalog]=await Promise.all([api('/api/admin/categories'),api('/api/admin/menu')]);
+    categoryDraft=structuredClone(state.items);categorySaved=structuredClone(state.items);categoryRevision=state.revision;menu=catalog.menu;setCategories(state.items);render();return;
+  }
   const data=await api("/api/admin/menu");menu=data.menu;menuRevision=data.order_revision;
+  setCategories(data.categories);
   savedMenuIds=menu.map(m=>m.id);
   render();
 }
@@ -180,9 +190,24 @@ document.addEventListener("submit",event=>{
   }
   act(async()=>{
     const data=new FormData(form);
+    if(form.id==='password-reset'){
+      await api('/api/admin/reset-password',Object.fromEntries(data));current='orders';login();notice('암호를 재설정했습니다. 새 암호로 로그인한 뒤 복구 코드를 다시 발급해 주세요.');return;
+    }
     if(form.id==="login"){
       await api("/api/admin/login",{password:data.get("password")});
       await refresh();poll();return;
+    }
+    if(form.id==='category-settings'){
+      await api('/api/admin/categories',{items:categoryDraft,revision:categoryRevision});await refresh();notice('분류 이름과 순서를 저장했습니다.');return;
+    }
+    if(form.id==='password-settings'){
+      await api('/api/admin/password',Object.fromEntries(data));current='orders';login();notice('암호를 변경했습니다. 새 암호로 로그인한 뒤 복구 코드를 다시 발급해 주세요.');return;
+    }
+    if(form.id==='recovery-settings'){
+      const result=await api('/api/admin/recovery-code',Object.fromEntries(data));form.elements.current_password.value='';
+      form.querySelector('#recovery-result').innerHTML=recoveryResult(result.code);
+      form.querySelector('.info-note').textContent='복구 코드를 발급했습니다. 지금 별도로 보관해 주세요.';
+      form.querySelector('[type=submit]').textContent='복구 코드 새로 발급';return;
     }
     if(form.id!=="menu-editor" || !editor)return;
     const payload=await editorData(form,editor);
@@ -196,6 +221,22 @@ document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(!b || b.disabled || b.type==="submit" && b.closest("form"))return;
 if(busy)return;
+  if(b.hasAttribute('data-show-recovery')){notice();login(true);return;}
+  if(b.hasAttribute('data-show-login')){notice();login();return;}
+  if(b.hasAttribute('data-save-recovery')){
+    const code=document.querySelector('[data-recovery-value]')?.value;if(!code)return;
+    const url=URL.createObjectURL(new Blob(['버거 키오스크 관리자 일회용 복구 코드\n\n'+code+'\n\n암호 재설정 시 사용합니다. 안전한 곳에 보관하세요.\n'],{type:'text/plain;charset=utf-8'}));
+    const link=document.createElement('a');link.href=url;link.download='kiosk-recovery-code.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return;
+  }
+  if(b.hasAttribute('data-category-add')){
+    if(categoryDraft.length>=20)return;categoryDraft.push({id:'cat_'+crypto.randomUUID().replaceAll('-',''),name:''});render();app.querySelector('.category-row:last-child input').focus();return;
+  }
+  if(b.hasAttribute('data-category-move')){
+    const i=Number(b.dataset.categoryMove),j=i+Number(b.dataset.direction);if(j<0||j>=categoryDraft.length)return;
+    [categoryDraft[i],categoryDraft[j]]=[categoryDraft[j],categoryDraft[i]];render();return;
+  }
+  if(b.hasAttribute('data-category-remove')){const i=Number(b.dataset.categoryRemove);if(categoryDraft.length>1&&!menu.some(m=>m.category===categoryDraft[i]?.id)){categoryDraft.splice(i,1);render();}return;}
+  if(b.hasAttribute('data-category-discard')){categoryDraft=structuredClone(categorySaved);render();return;}
   if(b.dataset.cancelOrder){openCancel(b.dataset.cancelOrder);return;}
   if(b.hasAttribute('data-close-cancel')){cancelDialog.close();return;}
   if(b.dataset.toggleStock){
@@ -239,6 +280,7 @@ if(busy)return;
     refreshOrders().catch(error=>{if(session===sessionEpoch){if(error.status===401)login();else notice(error.message);}}).finally(()=>{b.disabled=false;});return;
   }
   if(current==="menu"&&!editor&&orderDirty()&&(b.dataset.tab||b.dataset.act==="logout")&&!confirm("저장하지 않은 메뉴 순서를 되돌리고 이동할까요?"))return;
+  if(current==='categories'&&categoriesDirty()&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 분류 변경을 되돌리고 이동할까요?'))return;
   act(async()=>{
     if(b.dataset.tab){closeEditor();current=b.dataset.tab;await refresh();}
     else if(b.dataset.act==="logout"){await api("/api/admin/logout",{});login();}
@@ -264,6 +306,10 @@ document.addEventListener("change",event=>{
   }
 });
 document.addEventListener('input',event=>{
+  if(event.target.hasAttribute('data-category-name')){
+    const item=categoryDraft.find(c=>c.id===event.target.dataset.categoryName);if(item)item.name=event.target.value;
+    const status=document.querySelector('[data-category-dirty]');if(status)status.textContent=categoriesDirty()?'저장하지 않은 변경이 있습니다.':'현재 저장된 분류입니다.';return;
+  }
   if(event.target.name==='reason'){event.target.setCustomValidity('');return;}
   if(!['photo-x','photo-y'].includes(event.target.name))return;
   const form=event.target.closest('#menu-editor');if(form&&editor)void refreshPhotoPreview(form);
