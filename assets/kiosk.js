@@ -1,13 +1,18 @@
 import {evaluateGroups} from "./choice-rules.js";
 import {labels, menuPicture, setCategories} from "./catalog.js";
 import {api, app, money, escapeText, itemsHtml, notice} from "./common.js";
+import {welcomeView,heroView,diningName} from './welcome.js';
 
 const storageKey = "burger-kiosk-session-v1";
-const defaults = () => ({cart: [], page: "menu", checkoutKey: null, orderId: null, attemptKey: null, callback: null});
+const defaults = () => ({cart: [], page: "welcome", diningType:null, checkoutKey: null, orderId: null, attemptKey: null, callback: null});
 let state;
 try { state = {...defaults(), ...JSON.parse(sessionStorage.getItem(storageKey))}; }
 catch { state = defaults(); }
 let menu = [], mode = "demo", clientKey = "", order = null, busy = false;
+let ads=[],adIndex=0,adPaused=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const validDining=()=>['DINE_IN','TAKEOUT'].includes(state.diningType);
+async function loadAds(){try{ads=(await api('/api/ads')).items;adIndex=Math.min(adIndex,Math.max(0,ads.length-1));}catch{/* Ordering remains available without advertising. */}}
+function paintAd(){const host=document.querySelector('#welcome-ad');if(!host)return;host.innerHTML=heroView(ads[adIndex],menu);const counter=document.querySelector('#ad-position');if(counter)counter.textContent=(adIndex+1)+' / '+ads.length;}
 const dialog = document.querySelector("#options");
 const save = () => sessionStorage.setItem(storageKey, JSON.stringify(state));
 const count = () => state.cart.reduce((sum, line) => sum + line.quantity, 0);
@@ -21,6 +26,7 @@ const button = (action, text, primary = true, disabled = false) =>
   `<button class="${primary?"primary":"secondary"}" data-action="${action}" ${disabled?"disabled":""}>${text}</button>`;
 
 function go(page) {
+  if(['menu','cart','review'].includes(page)&&!validDining()&&!state.orderId)page='welcome';
   state.page = page;
   save();
   render();
@@ -154,7 +160,7 @@ function checkoutView() {
   const lines = order ? itemsHtml(order.items) : cartLines();
   const amount = order ? order.total : total();
   return `<div class="narrow"><div class="heading"><h1>주문 확인 및 결제</h1><p>메뉴와 최종 금액을 확인해 주세요.</p></div>
-    <section class="panel">${lines}<div class="line-heading pay-method"><span>결제 방식</span><b>${mode==="demo"?"모의 카드 결제":"토스페이먼츠 테스트"}</b></div>
+    <section class="panel"><p class="dining-summary">이용 방식 · <strong>${diningName(order?order.dining_type:state.diningType)}</strong></p>${lines}<div class="line-heading pay-method"><span>결제 방식</span><b>${mode==="demo"?"모의 카드 결제":"토스페이먼츠 테스트"}</b></div>
     ${demoSelect()}<div class="total"><span>최종 결제 금액</span><strong>${money(amount)}</strong></div>
     <div class="actions">${button("cart","장바구니 수정",false)}${button("pay",money(amount)+" 결제하기")}</div>
     <div class="checkout-exits">${button("menu","메뉴 선택으로 돌아가기",false)}<button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div></section></div>`;
@@ -166,30 +172,34 @@ function resultView() {
   if (!order) return checkoutView();
   if(state.page==='cancelled')return `<div class="narrow"><div class="heading"><h1>주문이 취소되었습니다</h1></div><section class="panel receipt">
     <p class="error-note">매장에서 ${String(order.number).padStart(3,'0')}번 주문을 취소했습니다.</p>
-    <p>취소 사유: ${escapeText(order.cancel_reason||'매장 요청')}</p>${itemsHtml(order.items)}
+    <p>취소 사유: ${escapeText(order.cancel_reason||'매장 요청')}</p><p class="dining-summary">${diningName(order.dining_type)} 주문</p>${itemsHtml(order.items)}
     <div class="total"><span>모의 결제 취소 금액</span><strong>${money(order.total)}</strong></div>${button('reset','메뉴 다시 선택')}</section></div>`;
   if (state.page==="done") return `<div class="narrow"><div class="heading"><h1>주문이 접수되었습니다</h1></div><div class="panel receipt">
-    <div class="pickup"><span>주문번호</span><strong>${String(order.number).padStart(3,"0")}</strong></div><p>수령 시 주문번호를 확인해 주세요.</p>
+    <div class="pickup"><span>${diningName(order.dining_type)} · 주문번호</span><strong>${String(order.number).padStart(3,"0")}</strong></div><p>수령 시 주문번호를 확인해 주세요.</p>
     ${itemsHtml(order.items)}<div class="total"><span>결제 금액</span><strong>${money(order.total)}</strong></div>${button("reset","처음으로")}</div></div>`;
   const failed = state.page==="failed";
   return `<div class="narrow"><div class="heading"><h1>${failed?"결제를 다시 시도해 주세요":"결제 결과 확인"}</h1></div><section class="panel">
     <p class="${failed?"error-note":"info-note"}">${failed?"승인이 거절되었거나 결제창이 닫혔습니다. 같은 주문으로 다시 결제할 수 있습니다.":
       order.payment?.has_key?"기존 거래의 승인 결과를 확인하고 있습니다.":"기존 주문의 테스트 결제 인증을 완료해 주세요."}</p>
-    ${itemsHtml(order.items)}<div class="total"><span>결제할 금액</span><strong>${money(order.total)}</strong></div>
+    <p class="dining-summary">${diningName(order.dining_type)} 주문</p>${itemsHtml(order.items)}<div class="total"><span>결제할 금액</span><strong>${money(order.total)}</strong></div>
     ${failed?demoSelect():""}<div class="actions">${failed?button("edit","장바구니 수정",false):""}
     ${button(failed?"retry":"resume",failed?"다시 결제":order.payment?.has_key||state.callback?"결과 다시 확인":"결제창 열기")}</div>
     ${failed?'<div class="checkout-exits"><button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div>':""}</section></div>`;
 }
 function render() {
+  document.querySelector('#steps').hidden=state.page==='welcome';
   const stage={menu:0,cart:1,review:2,failed:2,pending:2,done:3,cancelled:3}[state.page] ?? 0;
   document.querySelector("#steps").innerHTML = ["메뉴 선택","장바구니","결제","주문 완료"].map((label,i)=>
     `<span class="${i===stage?"active":i<stage?"past":""}" ${i===stage?'aria-current="step"':""}><i>${i+1}</i>${label}</span>`).join("");
-  if(state.page==="menu") app.innerHTML=menuView();
+  if(state.page==='welcome')app.innerHTML=welcomeView(ads,adIndex,menu,adPaused,count());
+  else if(state.page==="menu") app.innerHTML=menuView();
   else if(state.page==="cart") app.innerHTML=`<div class="narrow"><div class="heading split"><h1>장바구니</h1>${button("menu","메뉴 더 담기",false)}</div>${cartSummary(true)}</div>`;
   else if(state.page==="review") app.innerHTML=checkoutView();
   else app.innerHTML=resultView();
+  if(['menu','cart'].includes(state.page))app.insertAdjacentHTML('afterbegin',`<div class="dining-toolbar"><span>이용 방식 <strong>${diningName(state.diningType)}</strong></span><button class="text-btn" data-action="change-dining">매장·포장 변경</button></div>`);
 }
 function applyOrder(record) {
+  state.diningType=record.dining_type??null;
   if(record.status==='CANCELLED'&&record.cancelled_by==='admin'){order=record;state.orderId=record.id;go('cancelled');return;}
   if(record.status==="CANCELLED"){invalidateOrder();go(count()?"cart":"menu");return;}
   order=record; state.orderId=record.id;
@@ -199,10 +209,11 @@ function applyOrder(record) {
   else go("review");
 }
 async function pay() {
+  if(!order&&!validDining()){go('welcome');notice('매장 또는 포장을 먼저 선택해 주세요.');return;}
   const demo_result=document.querySelector("#demo-result")?.value || "success";
   if (!state.checkoutKey) {state.checkoutKey=crypto.randomUUID();save();}
   if (!order) {
-    order=await api("/api/orders",{key:state.checkoutKey,items:state.cart.map(l=>({
+    order=await api("/api/orders",{key:state.checkoutKey,dining_type:state.diningType,items:state.cart.map(l=>({
       menu_id:l.id,options:l.options,selections:l.selections??[],quantity:l.quantity,expected_unit:l.unit,expected_version:l.version
     }))});
     state.orderId=order.id;save();
@@ -263,16 +274,20 @@ document.addEventListener("click",event=>{
   const control=event.target.closest("[data-action]");
   if(!control || control.disabled)return;
   const action=control.dataset.action;
+  if(action.startsWith('ad-')){if(busy||!ads.length)return;if(action==='ad-pause'){adPaused=!adPaused;control.textContent=adPaused?'자동 재생':'일시 정지';control.setAttribute('aria-pressed',String(adPaused));}else{adIndex=(adIndex+(action==='ad-next'?1:ads.length-1))%ads.length;paintAd();}return;}
   if(action==="close") {dialog.close();return;}
   if(["clear-cart","cancel-order"].includes(action)){
     if(busy||!confirm(action==="clear-cart"?"장바구니의 메뉴를 모두 비울까요?":"현재 주문을 모두 취소하고 처음부터 시작할까요?"))return;
-    run(async()=>{await leaveCheckout();state=defaults();categoryFilter="all";go("menu");
-      notice(action==="clear-cart"?"장바구니를 비웠습니다.":"결제 전 주문을 취소했습니다. 메뉴를 다시 선택해 주세요.");});return;
+    run(async()=>{await leaveCheckout();const previousType=state.diningType;state=defaults();categoryFilter="all";
+      if(action==='clear-cart'){state.diningType=previousType;go('menu');}else{await loadAds();go('welcome');}
+      notice(action==="clear-cart"?"장바구니를 비웠습니다.":"결제 전 주문을 취소했습니다. 이용 방식을 다시 선택해 주세요.");});return;
   }
   run(async()=>{
+    if(action==='dining'){if(!['DINE_IN','TAKEOUT'].includes(control.dataset.dining))return;await leaveCheckout();state.diningType=control.dataset.dining;await loadMenu();go('menu');return;}
+    if(action==='change-dining'){await leaveCheckout();await loadAds();go('welcome');return;}
     if(action==="configure"){const index=Number(control.dataset.i);return optionView(state.cart[index].id,index);}
     if(action==="choose") return optionView(Number(control.dataset.id));
-    if(action==="reset"){categoryFilter="all";state=defaults();order=null;await loadMenu();go("menu");return;}
+    if(action==="reset"){categoryFilter="all";state=defaults();order=null;await Promise.all([loadMenu(),loadAds()]);go("welcome");return;}
     if(action==="edit"){await leaveCheckout();await loadMenu();syncPrices();go("cart");return;}
     if(action==="retry"){state.attemptKey=null;save();return pay();}
     if(action==="pay") return pay();
@@ -291,7 +306,7 @@ document.addEventListener("click",event=>{
   });
 });
 async function boot() {
-  await loadMenu();
+  await Promise.all([loadMenu(),loadAds()]);
   if(location.pathname==="/return") {
     const q=new URLSearchParams(location.search);
     if(q.has("attempt")) {
@@ -306,7 +321,7 @@ async function boot() {
     catch(error) {if(error.status!==404)throw error;state=defaults();save();}
   }
   if(state.callback) await resume();
-  else render();
+  else {if(!state.orderId&&!validDining()){state.page='welcome';save();}render();}
 }
 app.innerHTML='<button class="secondary" data-action="reload">메뉴 다시 불러오기</button>';
 run(boot);
@@ -318,6 +333,9 @@ async function refreshShelf() {
     const id=state.orderId;checkingShelf=true;
     try{const result=await api('/api/orders/'+id);if(state.page==='done'&&state.orderId===id&&result.status==='CANCELLED')applyOrder(result);}
     catch{}finally{checkingShelf=false;}return;
+  }
+  if(state.page==='welcome'){
+    checkingShelf=true;try{const data=await api('/api/ads');if(state.page==='welcome'&&!busy&&JSON.stringify(ads)!==JSON.stringify(data.items)){ads=data.items;adIndex=Math.min(adIndex,Math.max(0,ads.length-1));render();}}catch{}finally{checkingShelf=false;}return;
   }
   if(!['menu','cart'].includes(state.page))return;
   checkingShelf=true;
@@ -335,3 +353,4 @@ async function refreshShelf() {
 }
 document.addEventListener("visibilitychange",refreshShelf);
 setInterval(refreshShelf,15000);
+setInterval(()=>{if(state.page==='welcome'&&!document.hidden&&!busy&&!adPaused&&ads.length>1&&!document.querySelector('.ad-navigation')?.contains(document.activeElement)){adIndex=(adIndex+1)%ads.length;paintAd();}},8000);
