@@ -30,6 +30,16 @@ function invalidateOrder() {
   Object.assign(state, {orderId:null, checkoutKey:null, attemptKey:null, callback:null});
   order = null;
 }
+async function leaveCheckout() {
+  if(state.orderId){
+    try {await api(`/api/orders/${state.orderId}/cancel`,{});}
+    catch(error){
+      if(error.status===409)applyOrder(await api("/api/orders/"+state.orderId));
+      throw error;
+    }
+  }
+  invalidateOrder();
+}
 async function loadMenu() {
   const catalog = await api("/api/menu");
   menu = catalog.menu; mode = catalog.mode; clientKey = catalog.clientKey;
@@ -58,7 +68,7 @@ function cartLines(edit = false) {
     <div class="line-heading">${edit?quantityControl(line,i):"<span></span>"}<strong>${money(line.unit*line.quantity)}</strong></div></div>`).join("");
 }
 function cartSummary(edit = false) {
-  return `<div class="panel"><h2>장바구니 <span class="counter">${count()}</span></h2>${cartLines(edit)}
+  return `<div class="panel"><div class="line-heading"><h2>장바구니 <span class="counter">${count()}</span></h2>${count()?'<button class="text-btn" data-action="clear-cart">전체 비우기</button>':""}</div>${cartLines(edit)}
     <div class="total"><span>합계</span><strong>${money(total())}</strong></div>
     ${button(edit?"review":"cart", edit?"주문 확인":"장바구니 보기",true,!count()||(edit && state.cart.some(line=>!currentMenu(line.id)||line.needsChoice)))}</div>`;
 }
@@ -145,7 +155,8 @@ function checkoutView() {
   return `<div class="narrow"><div class="heading"><h1>주문 확인 및 결제</h1><p>메뉴와 최종 금액을 확인해 주세요.</p></div>
     <section class="panel">${lines}<div class="line-heading pay-method"><span>결제 방식</span><b>${mode==="demo"?"모의 카드 결제":"토스페이먼츠 테스트"}</b></div>
     ${demoSelect()}<div class="total"><span>최종 결제 금액</span><strong>${money(amount)}</strong></div>
-    <div class="actions">${button("cart","이전",false)}${button("pay",money(amount)+" 결제하기")}</div></section></div>`;
+    <div class="actions">${button("cart","장바구니 수정",false)}${button("pay",money(amount)+" 결제하기")}</div>
+    <div class="checkout-exits">${button("menu","메뉴 선택으로 돌아가기",false)}<button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div></section></div>`;
 }
 function demoSelect() {
   return mode==="demo"?`<label class="select-row">모의 승인 결과<select id="demo-result"><option value="success">승인 성공</option><option value="failure">승인 거절</option></select></label>`:"";
@@ -161,7 +172,8 @@ function resultView() {
       order.payment?.has_key?"기존 거래의 승인 결과를 확인하고 있습니다.":"기존 주문의 테스트 결제 인증을 완료해 주세요."}</p>
     ${itemsHtml(order.items)}<div class="total"><span>결제할 금액</span><strong>${money(order.total)}</strong></div>
     ${failed?demoSelect():""}<div class="actions">${failed?button("edit","장바구니 수정",false):""}
-    ${button(failed?"retry":"resume",failed?"다시 결제":order.payment?.has_key||state.callback?"결과 다시 확인":"결제창 열기")}</div></section></div>`;
+    ${button(failed?"retry":"resume",failed?"다시 결제":order.payment?.has_key||state.callback?"결과 다시 확인":"결제창 열기")}</div>
+    ${failed?'<div class="checkout-exits"><button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div>':""}</section></div>`;
 }
 function render() {
   const stage={menu:0,cart:1,review:2,failed:2,pending:2,done:3}[state.page] ?? 0;
@@ -173,6 +185,7 @@ function render() {
   else app.innerHTML=resultView();
 }
 function applyOrder(record) {
+  if(record.status==="CANCELLED"){invalidateOrder();go(count()?"cart":"menu");return;}
   order=record; state.orderId=record.id;
   if(record.number!=null) go("done");
   else if(record.payment?.status==="FAILED") go("failed");
@@ -224,6 +237,7 @@ async function resume() {
   else await openGateway();
 }
 async function recover(error) {
+  if(error.code==="ORDER_CANCELLED"){invalidateOrder();go(count()?"cart":"menu");}
   if (error.code==="CART_CHANGED") {
     invalidateOrder();
     await loadMenu();syncPrices();go("cart");
@@ -244,21 +258,28 @@ document.addEventListener("click",event=>{
   if(!control || control.disabled)return;
   const action=control.dataset.action;
   if(action==="close") {dialog.close();return;}
+  if(["clear-cart","cancel-order"].includes(action)){
+    if(busy||!confirm(action==="clear-cart"?"장바구니의 메뉴를 모두 비울까요?":"현재 주문을 모두 취소하고 처음부터 시작할까요?"))return;
+    run(async()=>{await leaveCheckout();state=defaults();categoryFilter="all";go("menu");
+      notice(action==="clear-cart"?"장바구니를 비웠습니다.":"결제 전 주문을 취소했습니다. 메뉴를 다시 선택해 주세요.");});return;
+  }
   run(async()=>{
     if(action==="configure"){const index=Number(control.dataset.i);return optionView(state.cart[index].id,index);}
     if(action==="choose") return optionView(Number(control.dataset.id));
     if(action==="reset"){categoryFilter="all";state=defaults();order=null;await loadMenu();go("menu");return;}
-    if(action==="edit"){invalidateOrder();await loadMenu();syncPrices();go("cart");return;}
+    if(action==="edit"){await leaveCheckout();await loadMenu();syncPrices();go("cart");return;}
     if(action==="retry"){state.attemptKey=null;save();return pay();}
     if(action==="pay") return pay();
     if(action==="resume") return resume();
     if(action==="reload") return boot();
     if(["minus","plus","remove"].includes(action)) {
+      await leaveCheckout();
       const i=Number(control.dataset.i);
       if(action==="remove") state.cart.splice(i,1);
       else state.cart[i].quantity=Math.max(1,Math.min(99,state.cart[i].quantity+(action==="plus"?1:-1)));
       invalidateOrder();go("cart");return;
     }
+    if(action==="menu"||action==="cart")await leaveCheckout();
     if(action==="menu") await loadMenu();
     go(action);
   });
