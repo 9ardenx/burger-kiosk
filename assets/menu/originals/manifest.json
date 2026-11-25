@@ -1,0 +1,55 @@
+{
+  "description": "Server-stored menu photos before the fries background edit. Upload-time JPEG resizing is already applied.",
+  "verified_at": "2026-11-25T13:20:10.678Z",
+  "photos": [
+    {
+      "menu_id": 1,
+      "name": "클래식버거",
+      "file": "classic-burger.jpg",
+      "sha256": "30132624add01de8b05156f0744bbc15d027b0f09523083be7c9c6191391883c",
+      "bytes": 24139
+    },
+    {
+      "menu_id": 2,
+      "name": "치킨버거",
+      "file": "chicken-burger.jpg",
+      "sha256": "e6ce214147009cd05e5d3af77edb961d305ce6aaa6667d86e61c88325044ed61",
+      "bytes": 26302
+    },
+    {
+      "menu_id": 3,
+      "name": "감자튀김",
+      "file": "fries.jpg",
+      "sha256": "e295e34df49a271633d590ad6c1df40ca8cec97a8bcde56b6c0bcf3e0c726fe0",
+      "bytes": 45695
+    },
+    {
+      "menu_id": 4,
+      "name": "탄산음료",
+      "file": "soda.jpg",
+      "sha256": "7257f29993f08708204bd48c18dc754929b6dc0f56cd0070b6b6efe329cb3817",
+      "bytes": 31360
+    },
+    {
+      "menu_id": 5,
+      "name": "치킨너겟",
+      "file": "chicken-nuggets.jpg",
+      "sha256": "35e7d3e836fbf49609ce593f75204adf89e2812a2600d73f0c4a3491f6b75f2e",
+      "bytes": 26388
+    },
+    {
+      "menu_id": 6,
+      "name": "버팔로윙 (6p)",
+      "file": "buffalo-wings.jpg",
+      "sha256": "509edbe11262c56b6b344d5401082596c81ccd9dd1d012882a5954474a278043",
+      "bytes": 27382
+    },
+    {
+      "menu_id": 7,
+      "name": "새우 버거",
+      "file": "shrimp-burger.jpg",
+      "sha256": "24193ce38dd686b3af5e14ed04f0663ceb1ea44dad04aa29da65f87c920f2646",
+      "bytes": 24455
+    }
+  ]
+}
