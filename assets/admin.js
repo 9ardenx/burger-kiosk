@@ -5,6 +5,7 @@ import {categoryName,menuPicture,setCategories} from "./catalog.js";
 import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js';
 import {adList,adEditor} from './advertising-ui.js';
 import {diningName} from './welcome.js';
+import {salesView,inventoryView,periodPreset} from './insights-ui.js';
 import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
 
 const tabs=document.querySelector("#tabs");
@@ -15,6 +16,7 @@ let current="orders", orders=[], menu=[], busy=false, selected=null, filter="ope
 let editor=null, previewUrl=null, previewSequence=0;
 let categoryDraft=[],categorySaved=[],categoryRevision=0,security=null;
 let advertising={items:[],revision:0},adEdit=null,adSequence=0,adDirty=false;
+let sales=null,salesPeriod=periodPreset(),inventory={items:[],history:[]},inventoryEdit=null,inventoryFilter='all';
 const adPhotoOptions=form=>({width:1440,height:810,x:Number(form.elements['ad-x'].value)/100,y:Number(form.elements['ad-y'].value)/100});
 async function refreshAdPreview(form){
   const sequence=++adSequence,file=form.elements['ad-photo'].files[0];if(!file)return;
@@ -44,7 +46,7 @@ async function refreshPhotoPreview(form) {
     state.textContent=error.message;notice(error.message);
   }
 }
-function closeEditor(){resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;}
+function closeEditor(){resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;inventoryEdit=null;}
 function login(recovery=false) {
   cancelDialog.close();
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
@@ -65,7 +67,7 @@ if(editor)return editorHtml(editor.item);
     <div class="actions"><button class="secondary" data-discard-order ${orderDirty()?"":"disabled"}>되돌리기</button><button class="primary" data-save-order ${orderDirty()?"":"disabled"}>순서 저장</button></div></div>
     <div class="admin-menus">
     ${menu.map((item,index)=>`<article class="panel catalog-card" data-menu-id="${item.id}"><img src="${menuPicture(item)}" alt="">
-      <div><small>${index+1}번째 · ${escapeText(categoryName(item.category))} · ${item.is_sold_out?"품절":"판매 중"}</small><h2>${escapeText(item.name)}</h2>
+      <div><small>${index+1}번째 · ${escapeText(categoryName(item.category))} · ${item.is_sold_out?"수동 품절":item.stock_sold_out?'재고 소진 · 자동 품절':"판매 중"}</small><h2>${escapeText(item.name)}</h2>
       <strong>${money(item.base_price)}</strong></div><div class="catalog-actions"><button class="secondary" data-edit-menu="${item.id}" ${orderDirty()?"disabled":""} aria-label="${escapeText(item.name)} 수정">수정</button>
       <button class="${item.is_sold_out?'secondary':'danger-outline'}" data-toggle-stock="${item.id}" ${orderDirty()?"disabled":""} aria-label="${escapeText(item.name)} ${item.is_sold_out?'판매 재개':'품절 처리'}">${item.is_sold_out?'판매 재개':'품절 처리'}</button></div>
       <div class="menu-position"><button class="secondary" data-move-menu="${item.id}" data-direction="-1" ${index===0?"disabled":""} aria-label="${escapeText(item.name)} 앞으로 이동">앞으로</button>
@@ -105,18 +107,20 @@ function patchOrders() {
   if(!rows.length&&!host.children.length)host.innerHTML='<div class="table-empty">표시할 주문이 없습니다.</div>';
   const detail=rows.find(o=>o.id===selected), target=document.querySelector("#order-detail");
   const html=detail?`<section class="panel order-detail"><h2>${String(detail.number).padStart(3,"0")}번 주문 상세</h2><p class="dining-summary">${diningName(detail.dining_type)} 주문</p>${itemsHtml(detail.items)}
-    ${detail.status==='CANCELLED'?`<div class="error-note">관리자 직권취소 · ${escapeText(new Date(detail.cancelled_at.replace(' ','T')+'Z').toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}))}<br>사유: ${escapeText(detail.cancel_reason||'—')}</div>`:''}
+    ${detail.status==='CANCELLED'?`<div class="error-note">관리자 직권취소 · ${escapeText(new Date(detail.cancelled_at.replace(' ','T')+'Z').toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}))}<br>사유: ${escapeText(detail.cancel_reason||'—')}<br>${detail.restock_on_cancel===null?'이전 주문 · 재고 복원 선택 기록 없음':detail.restock_on_cancel?'차감했던 재고 복원':'재고 복원 안 함'}</div>`:''}
     <div class="total"><span>${detail.status==='CANCELLED'?'모의 결제 취소 금액':'결제 금액'}</span><strong>${money(detail.total)}</strong></div></section>`:"";
   if(target.innerHTML!==html)target.innerHTML=html;
 }
 function render() {
   tabs.hidden=false;
-  tabs.innerHTML=Object.entries({orders:'주문 현황',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',security:'암호 관리'}).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
-  app.innerHTML=current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
+  tabs.innerHTML=Object.entries({orders:'주문 현황',sales:'매출 분석',inventory:'재고 관리',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',security:'암호 관리'}).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
+  app.innerHTML=current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
   if(current==="orders")patchOrders();
   setRequestState(busy);
 }
 async function refresh() {
+  if(current==='sales'){sales=await api('/api/admin/sales?'+new URLSearchParams(salesPeriod));render();return;}
+  if(current==='inventory'){inventory=await api('/api/admin/inventory');render();return;}
   if(current==='ads'){advertising=await api('/api/admin/ads');render();return;}
   if(current==="orders"){await refreshOrders();if(!document.querySelector("#order-rows"))render();return;}
   if(current==='security'){security=await api('/api/admin/security');render();return;}
@@ -136,12 +140,12 @@ async function refreshOrders() {
   orders=data.orders.map(o=>pendingOrders.has(o.id)?orders.find(previous=>previous.id===o.id)??o:o);
   if(current==="orders")patchOrders();
 }
-async function advanceOrder(id,expected,reason=null) {
+async function advanceOrder(id,expected,reason=null,restock=false) {
   if(pendingOrders.has(id))return;
   const session=sessionEpoch;
   pendingOrders.add(id);orderEpoch++;patchOrders();notice();
   try{
-    const result=await api("/api/admin/orders/"+id+(reason===null?'':'/cancel'),{expected,...(reason===null?{}:{reason})});
+    const result=await api("/api/admin/orders/"+id+(reason===null?'':'/cancel'),{expected,...(reason===null?{}:{reason,restock})});
     if(session!==sessionEpoch)return;
     orders=orders.map(o=>o.id===id?result.order:o);
     if(reason!==null)notice('주문을 직권취소했습니다. 취소 내역에서 확인할 수 있습니다.');
@@ -159,6 +163,8 @@ function openCancel(id) {
     <h2 id="admin-cancel-title">${String(order.number).padStart(3,'0')}번 주문 직권취소</h2>
     <p class="muted">${money(order.total)} 모의 결제 주문을 취소합니다. 취소 후에는 조리를 진행할 수 없습니다.</p>
     <label>취소 사유<textarea name="reason" required maxlength="200" rows="3" placeholder="예: 재료 소진으로 주문 제공 불가"></textarea></label>
+    <label class="check-line"><input type="checkbox" name="restock" ${order.status==='PAID'?'checked':''}>이 주문에서 차감한 재고 복원</label>
+    <p class="muted">${order.status==='PAID'?'조리 전 주문은 복원을 기본으로 선택합니다.':'조리한 음식은 다시 판매할 수 있는지 확인한 뒤 복원해 주세요.'} 실제 차감 이력이 있는 수량만 복원합니다.</p>
     <p class="error-note" data-cancel-error hidden></p><div class="actions"><button type="button" class="secondary" data-close-cancel>돌아가기</button><button class="danger" type="submit">직권취소 확정</button></div></form>`;
   cancelDialog.showModal();
 }
@@ -196,13 +202,21 @@ document.addEventListener("submit",event=>{
     const reason=form.elements.reason.value.trim();
     if(!reason){form.elements.reason.setCustomValidity('취소 사유를 입력해 주세요.');form.elements.reason.reportValidity();return;}
     form.dataset.pending='1';form.inert=true;
-    void advanceOrder(form.dataset.orderId,form.dataset.expected,reason).then(ok=>{
+    void advanceOrder(form.dataset.orderId,form.dataset.expected,reason,form.elements.restock.checked).then(ok=>{
       if(ok)cancelDialog.close();
       else {const error=form.querySelector('[data-cancel-error]');error.hidden=false;error.textContent=document.querySelector('#notice').textContent||'취소하지 못했습니다. 최신 주문 상태를 확인해 주세요.';}
     }).finally(()=>{delete form.dataset.pending;form.inert=false;});return;
   }
   act(async()=>{
     const data=new FormData(form);
+    if(form.id==='sales-period'){
+      salesPeriod={from:data.get('from'),to:data.get('to')};await refresh();return;
+    }
+    if(form.id==='inventory-editor'){
+      await api('/api/admin/inventory/'+form.dataset.menuId,{enabled:data.has('enabled'),quantity:Number(data.get('quantity')),
+        low_threshold:Number(data.get('low_threshold')),revision:Number(form.dataset.revision),reason:data.get('reason').trim()});
+      inventoryEdit=null;await refresh();notice('재고를 저장했습니다. 고객 화면은 다음 자동 조회에 반영됩니다.');return;
+    }
     if(form.id==='ad-editor'&&adEdit){
       const item={id:adEdit.id,title:data.get('ad-title').trim(),description:data.get('ad-description').trim(),enabled:data.has('ad-enabled')};
       if(form.elements['ad-photo'].files.length)item.photo=await jpegForUpload(form.elements['ad-photo'].files[0],adPhotoOptions(form));
@@ -240,6 +254,11 @@ document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(!b || b.disabled || b.type==="submit" && b.closest("form"))return;
 if(busy)return;
+  if(b.dataset.salesDays){act(async()=>{salesPeriod=periodPreset(Number(b.dataset.salesDays));await refresh();});return;}
+  if(b.dataset.inventoryEdit){inventoryEdit=structuredClone(inventory.items.find(i=>i.id===Number(b.dataset.inventoryEdit)));render();app.querySelector('[name="quantity"]').focus();return;}
+  if(b.hasAttribute('data-inventory-back')){inventoryEdit=null;render();return;}
+  if(b.hasAttribute('data-inventory-refresh')){act(refresh);return;}
+  if(b.dataset.inventoryFilter){inventoryFilter=b.dataset.inventoryFilter;render();return;}
   if(b.hasAttribute('data-new-ad')||b.dataset.editAd){adEdit={id:b.dataset.editAd||crypto.randomUUID(),item:advertising.items.find(a=>a.id===b.dataset.editAd)??null};adDirty=false;adSequence++;render();return;}
   if(b.hasAttribute('data-back-ads')){if(adDirty&&!confirm('저장하지 않은 광고 변경을 버리고 돌아갈까요?'))return;closeEditor();render();return;}
   if(b.dataset.deleteAd){const item=advertising.items.find(a=>a.id===b.dataset.deleteAd);if(item&&confirm('「'+item.title+'」 광고를 삭제할까요?'))act(async()=>{await saveAdCatalog(advertising.items.filter(a=>a.id!==item.id));notice('광고를 삭제했습니다.');});return;}
@@ -306,6 +325,7 @@ if(busy)return;
   if(current==="menu"&&!editor&&orderDirty()&&(b.dataset.tab||b.dataset.act==="logout")&&!confirm("저장하지 않은 메뉴 순서를 되돌리고 이동할까요?"))return;
   if(current==='categories'&&categoriesDirty()&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 분류 변경을 되돌리고 이동할까요?'))return;
   if(current==='ads'&&adDirty&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 광고 변경을 버리고 이동할까요?'))return;
+  if(current==='inventory'&&inventoryEdit&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 재고 입력을 버리고 이동할까요?'))return;
   act(async()=>{
     if(b.dataset.tab){closeEditor();current=b.dataset.tab;await refresh();}
     else if(b.dataset.act==="logout"){await api("/api/admin/logout",{});login();}
