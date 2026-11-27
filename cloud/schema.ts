@@ -96,3 +96,27 @@ export const accountAudit=sqliteTable('account_audit',{
 export const accountPolicy=sqliteTable('account_policy',{
  id:integer().primaryKey(),legacy_disabled:integer().notNull().default(0)
 });
+export const ingredients=sqliteTable('ingredient',{
+ id:integer().primaryKey({autoIncrement:true}),registration_key:text().notNull().unique(),name:text().notNull(),unit:text().notNull(),pack_label:text().notNull(),pack_size:integer().notNull(),active:integer().notNull().default(1),revision:integer().notNull().default(0)
+},t=>[check('ingredient_pack',sql`${t.pack_size} BETWEEN 1 AND 1000000`),check('ingredient_active',sql`${t.active} IN (0,1)`)]);
+export const ingredientStock=sqliteTable('ingredient_stock',{
+ store_id:integer().notNull().references(()=>stores.id),ingredient_id:integer().notNull().references(()=>ingredients.id),quantity:integer().notNull().default(0),low_threshold:integer().notNull().default(0),revision:integer().notNull().default(0)
+},t=>[primaryKey({columns:[t.store_id,t.ingredient_id]}),check('ingredient_stock_quantity',sql`${t.quantity} BETWEEN 0 AND 1000000000`),check('ingredient_stock_low',sql`${t.low_threshold} BETWEEN 0 AND 1000000000`)]);
+export const supplyOrders=sqliteTable('supply_order',{
+ id:text().primaryKey(),store_id:integer().notNull().references(()=>stores.id),request_key:text().notNull(),signature:text().notNull(),creation_tag:text().notNull(),action_tag:text(),requested_by:text().notNull(),note:text().notNull().default(''),status:text().notNull().default('REQUESTED'),revision:integer().notNull().default(0),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`),updated_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
+},t=>[uniqueIndex('supply_order_request').on(t.store_id,t.request_key),index('supply_order_store_status').on(t.store_id,t.status,t.created_at),check('supply_order_status',sql`${t.status} IN ('REQUESTED','APPROVED','SHIPPED','PARTIAL','RECEIVED','CANCELLED','REJECTED')`)]);
+export const supplyLines=sqliteTable('supply_line',{
+ id:text().primaryKey(),order_id:text().notNull().references(()=>supplyOrders.id),ingredient_id:integer().notNull().references(()=>ingredients.id),name:text().notNull(),unit:text().notNull(),pack_label:text().notNull(),pack_size:integer().notNull(),packs:integer().notNull(),ordered_units:integer().notNull(),received_units:integer().notNull().default(0)
+},t=>[uniqueIndex('supply_order_ingredient').on(t.order_id,t.ingredient_id),check('supply_packs',sql`${t.packs} BETWEEN 1 AND 10000`),check('supply_units',sql`${t.ordered_units} BETWEEN 1 AND 1000000000`),check('supply_received',sql`${t.received_units}>=0 AND ${t.received_units}<=${t.ordered_units}`)]);
+export const supplyReceipts=sqliteTable('supply_receipt',{
+ id:text().primaryKey(),order_id:text().notNull().references(()=>supplyOrders.id),store_id:integer().notNull().references(()=>stores.id),request_key:text().notNull(),signature:text().notNull(),creation_tag:text().notNull(),actor:text().notNull(),note:text().notNull().default(''),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
+},t=>[uniqueIndex('supply_receipt_request').on(t.store_id,t.request_key)]);
+export const supplyReceiptLines=sqliteTable('supply_receipt_line',{
+ receipt_id:text().notNull().references(()=>supplyReceipts.id),line_id:text().notNull().references(()=>supplyLines.id),quantity:integer().notNull()
+},t=>[primaryKey({columns:[t.receipt_id,t.line_id]}),check('receipt_positive',sql`${t.quantity}>0`)]);
+export const ingredientMovements=sqliteTable('ingredient_movement',{
+ id:integer().primaryKey({autoIncrement:true}),store_id:integer().notNull().references(()=>stores.id),ingredient_id:integer().notNull().references(()=>ingredients.id),kind:text().notNull(),delta:integer().notNull(),before_quantity:integer().notNull(),after_quantity:integer().notNull(),reason:text().notNull(),actor:text().notNull(),receipt_id:text().references(()=>supplyReceipts.id),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
+},t=>[uniqueIndex('ingredient_movement_receipt').on(t.receipt_id,t.ingredient_id),index('ingredient_movement_store').on(t.store_id,t.id),check('ingredient_movement_kind',sql`${t.kind} IN ('ADJUST','RECEIPT')`)]);
+export const supplyEvents=sqliteTable('supply_event',{
+ id:integer().primaryKey({autoIncrement:true}),order_id:text().notNull().references(()=>supplyOrders.id),status:text().notNull(),actor:text().notNull(),note:text().notNull().default(''),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
+});

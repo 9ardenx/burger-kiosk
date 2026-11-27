@@ -1,4 +1,4 @@
-import {photoUrl} from "./backend.js?v=20261128-v110";
+import {photoUrl} from "./backend.js?v=20261128-v111";
 let labels={burger:"버거",side:"사이드",drink:"음료"};
 function setCategories(items){if(Array.isArray(items)&&items.length)labels=Object.fromEntries(items.map(c=>[c.id,c.name]));}
 function categoryName(value) {return labels[value] || '미분류';}

@@ -1,6 +1,8 @@
 import {franchiseStores} from './franchise.mjs';
 import {storeProfile,saveStoreProfile} from './store-profile.mjs';
 import {hqSales} from './hq-sales.mjs';
+import {ingredientInventory,adjustIngredient,saveIngredient,requireHQ} from './ingredients.mjs';
+import {supplyList,supplyOrder,hqSupply,createSupply,transitionSupply,receiveSupply} from './procurement.mjs';
 import {accountConfig,legacyEnabled,principal,accountInfo,authorizeStore,claimAccount,listMembers,inviteMember,changeMember,revokeInvitation,createStore} from './accounts.mjs';
 import {storeId,storeDb,resolveStore} from './store-context.mjs';
 import {validateGroups, evaluateGroups} from "../docs/assets/choice-rules.js";
@@ -304,6 +306,12 @@ async function adminRoute(db,env,path,request,body) {
   }
   if(['/api/admin/security','/api/admin/password','/api/admin/recovery-code'].includes(path))check(actor.legacy,'이메일 계정의 비밀번호 복구를 이용해 주세요.',403,'ACCOUNT_LOGIN_REQUIRED');
   if(path==='/api/admin/promotions')return body?savePromotions(db,body):promotionState(db);
+  if(path==='/api/admin/ingredients'&&!body)return ingredientInventory(db);
+  const ingredientMatch=path.match(/^\/api\/admin\/ingredients\/(\d+)$/);
+  if(ingredientMatch&&body)return adjustIngredient(db,actor,Number(ingredientMatch[1]),body);
+  if(path==='/api/admin/supply')return body?createSupply(db,actor,body):supplyList(db,new URL(request.url).searchParams);
+  const supplyMatch=path.match(/^\/api\/admin\/supply\/([a-f0-9-]{36})(\/receive)?$/);
+  if(supplyMatch)return body?(supplyMatch[2]?receiveSupply(db,actor,supplyMatch[1],body):transitionSupply(db,actor,supplyMatch[1],body)):supplyOrder(db,supplyMatch[1]);
   if(path==='/api/admin/store-profile')return body?saveStoreProfile(db,actor,body):storeProfile(db);
   if(path==='/api/admin/sales'&&!body)return salesReport(db,new URL(request.url).searchParams);
   if(path==='/api/admin/inventory'&&!body)return inventoryState(db);
@@ -363,6 +371,15 @@ async function dispatch(request,env,path) {
   if(path==='/api/account'&&!body)return accountInfo(db,await principal(db,env,request));
   if(path==='/api/account/stores'){const actor=await principal(db,env,request);return body?createStore(db,actor,body):franchiseStores(db,actor);}
   if(path==='/api/account/sales'&&!body)return hqSales(db,await principal(db,env,request),new URL(request.url).searchParams);
+  if(path.startsWith('/api/account/supply')){
+    const actor=await principal(db,env,request);requireHQ(actor);
+    if(path==='/api/account/supply'&&!body)return hqSupply(db,actor,new URL(request.url).searchParams);
+    if(path==='/api/account/supply/ingredients'&&body)return saveIngredient(db,actor,body);
+    const ingredient=path.match(/^\/api\/account\/supply\/ingredients\/(\d+)$/);
+    if(ingredient&&body)return saveIngredient(db,actor,body,Number(ingredient[1]));
+    const order=path.match(/^\/api\/account\/supply\/orders\/([a-f0-9-]{36})$/);
+    if(order)return body?transitionSupply(db,actor,order[1],body,true):supplyOrder(db,order[1],null);
+  }
   const store=await resolveStore(db,request);db=storeDb(db,store.id);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
   if(path==='/api/ads'&&!body)return adState(db,true);
