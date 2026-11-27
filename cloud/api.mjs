@@ -1,7 +1,9 @@
+import {accountConfig,legacyEnabled,principal,accountInfo,authorizeStore,claimAccount,listMembers,inviteMember,changeMember,revokeInvitation,createStore} from './accounts.mjs';
+import {storeId,storeDb,resolveStore} from './store-context.mjs';
 import {validateGroups, evaluateGroups} from "../docs/assets/choice-rules.js";
 import sodaGroups from "./drink-example.json" with {type:"json"};
 import {Problem,check} from './problems.mjs';
-import {categoryState,saveCategories,DEFAULT_CATEGORY_JSON,CATEGORY_EXISTS} from './categories.mjs';
+import {categoryState,saveCategories,DEFAULT_CATEGORY_JSON,categoryExists} from './categories.mjs';
 import {loginAdmin,requireAdmin,securityInfo,changePassword,issueRecovery,resetPassword} from './admin-auth.mjs';
 import {adState,saveAds} from './advertising.mjs';
 import {inventoryState,saveInventory,checkStock} from './inventory.mjs';
@@ -23,7 +25,7 @@ const statement = (db, sql, ...args) => db.prepare(sql).bind(...args);
 const all = async (db, sql, ...args) => (await statement(db,sql,...args).all()).results;
 
 async function catalog(db, includeSold=false, publicView=false) {
-  if (!await db.prepare("SELECT id FROM menu LIMIT 1").first()) {
+  if (storeId(db)===1 && !await db.prepare("SELECT id FROM menu WHERE store_id=1 LIMIT 1").first()) {
     await db.batch([
       db.prepare(`INSERT OR IGNORE INTO menu(id,name,description,kind,base_price) VALUES
         (1,'클래식버거','그릴드 비프 패티, 토마토, 양상추','classic',5500),
@@ -40,11 +42,11 @@ async function catalog(db, includeSold=false, publicView=false) {
     ]);
   }
   const [menus,options,displayOrder,stock,quotes]=await db.batch([
-    db.prepare("SELECT id,name,description,kind,base_price,is_sold_out,version,category,photo_key,choice_groups FROM menu " + (includeSold?"":"WHERE is_sold_out=0 ") + "ORDER BY id"),
-    db.prepare("SELECT id,menu_id,name,extra_price FROM menu_option WHERE active=1 ORDER BY id"),
-    db.prepare("SELECT menu_ids,revision FROM menu_display_order WHERE id=1"),
+    db.prepare("SELECT id,name,description,kind,base_price,is_sold_out,version,category,photo_key,choice_groups FROM menu WHERE store_id="+storeId(db)+(includeSold?" ":" AND is_sold_out=0 ") + "ORDER BY id"),
+    db.prepare("SELECT id,menu_id,name,extra_price FROM menu_option WHERE active=1 AND menu_id IN (SELECT id FROM menu WHERE store_id="+storeId(db)+") ORDER BY id"),
+    db.prepare("SELECT menu_ids,revision FROM menu_display_order WHERE id="+storeId(db)),
     db.prepare('SELECT menu_id FROM inventory WHERE enabled=1 AND quantity=0'),
-    db.prepare('SELECT * FROM menu_pricing')
+    db.prepare(`SELECT q.* FROM menu_pricing q JOIN menu m ON m.id=q.id WHERE m.store_id=${storeId(db)}`)
   ]);
   const positions=new Map(JSON.parse(displayOrder.results[0]?.menu_ids??"[]").map((id,i)=>[id,i]));
   const exhausted=new Set(stock.results.map(s=>s.menu_id));
@@ -66,7 +68,7 @@ function toView(row) {
   return {...row,items:JSON.parse(row.items).map(({variants,options,...item})=>({...item,options:[...variants,...options]})),payment:row.payment?JSON.parse(row.payment):null};
 }
 async function readOrder(db,id,customer) {
-  const row=await statement(db,orderSelect+" WHERE o.id=? AND o.customer=?",id,customer).first();
+  const row=await statement(db,orderSelect+" WHERE o.id=? AND o.customer=? AND o.store_id=?",id,customer,storeId(db)).first();
   check(row,"주문을 찾을 수 없습니다.",404);
   return toView(row);
 }
@@ -75,7 +77,7 @@ async function createOrder(db,customer,body) {
   check([null,'DINE_IN','TAKEOUT'].includes(diningType),'매장 또는 포장을 선택해 주세요.');
   const cart=body.items;
   check(validKey(body.key) && Array.isArray(cart) && cart.length>=1 && cart.length<=50,"장바구니 구성을 확인해 주세요.");
-  const id=(await digest(customer+"/"+body.key)).slice(0,32);
+  const id=(await digest((storeId(db)===1?"":storeId(db)+"/")+customer+"/"+body.key)).slice(0,32);
   const signature=await digest(JSON.stringify(cart));
   const previous=await statement(db,"SELECT signature,dining_type FROM orders WHERE id=?",id).first();
   if(previous){
@@ -105,8 +107,8 @@ async function createOrder(db,customer,body) {
   const tag=crypto.randomUUID();
   const menuVersions=[...new Map(lines.map(l=>[l.menu.id,[l.menu.id,l.menu.version,l.menu.base_price,l.menu.promotion?.id??'']])).values()];
   const versionChecks=menuVersions.map(()=>"(m.id=? AND m.version=? AND q.sale_price=? AND coalesce(q.promotion_id,'')=?)").join(" OR ");
-  const commands=[statement(db,`INSERT OR IGNORE INTO orders(id,customer,signature,total,creation_tag,dining_type)
-    SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM menu m JOIN menu_pricing q ON q.id=m.id WHERE m.is_sold_out=0 AND (${versionChecks}))=?`,
+  const commands=[statement(db,`INSERT OR IGNORE INTO orders(id,customer,signature,total,creation_tag,dining_type,store_id)
+    SELECT ?,?,?,?,?,?,${storeId(db)} WHERE (SELECT count(*) FROM menu m JOIN menu_pricing q ON q.id=m.id WHERE m.store_id=${storeId(db)} AND m.is_sold_out=0 AND (${versionChecks}))=?`,
     id,customer,signature,total,tag,diningType,...menuVersions.flat(),menuVersions.length)];
   // A retried or concurrent request can write items only if it created this order.
   const created="EXISTS(SELECT 1 FROM orders WHERE id=? AND creation_tag=?)";
@@ -125,6 +127,7 @@ async function createOrder(db,customer,body) {
 }
 
 async function attempt(db,customer,id,body) {
+  await readOrder(db,id,customer);
   check(validKey(body.key) && ["success","failure"].includes(body.demo_result),"모의 승인 결과를 확인해 주세요.");
   const ticket=(await digest(id+"/"+body.key)).slice(0,32);
   const outcome=body.demo_result==="success"?"SUCCESS":"FAILED";
@@ -134,7 +137,7 @@ async function attempt(db,customer,id,body) {
       SELECT ?,o.id,o.total,? FROM orders o WHERE o.id=? AND o.customer=? AND o.status='PENDING_PAYMENT' AND o.cancelled_at IS NULL
       AND NOT EXISTS(SELECT 1 FROM order_item i JOIN menu m ON m.id=i.menu_id WHERE i.order_id=o.id AND m.is_sold_out=1)`,
       ticket,outcome,id,customer),
-    statement(db,`UPDATE orders SET status='PAID',number=(SELECT coalesce(max(number),0)+1 FROM orders)
+    statement(db,`UPDATE orders SET status='PAID',number=(SELECT coalesce(max(number),0)+1 FROM orders WHERE store_id=${storeId(db)})
       WHERE id=? AND customer=? AND status='PENDING_PAYMENT' AND cancelled_at IS NULL
       AND EXISTS(SELECT 1 FROM payment WHERE order_id=? AND status='SUCCESS')`,id,customer,id)
   ]);
@@ -148,6 +151,7 @@ async function attempt(db,customer,id,body) {
 }
 
 async function cancelUnpaid(db,customer,id) {
+  await readOrder(db,id,customer);
   await statement(db,`UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='customer' WHERE id=? AND customer=?
     AND status='PENDING_PAYMENT' AND cancelled_at IS NULL
     AND NOT EXISTS(SELECT 1 FROM payment WHERE order_id=? AND status IN ('PENDING','SUCCESS'))`,id,customer,id).run();
@@ -164,11 +168,11 @@ async function cancelByAdmin(db,id,body) {
   check(Object.hasOwn(NEXT,body.expected),'수령 전 주문만 직권취소할 수 있습니다.',409,'ORDER_CHANGED');
   // One conditional write arbitrates cancel vs. kitchen progression; approval history remains intact.
   const result=await statement(db,`UPDATE orders SET cancelled_at=CURRENT_TIMESTAMP,cancelled_by='admin',cancel_reason=?,restock_on_cancel=?
-    WHERE id=? AND status=? AND cancelled_at IS NULL
+    WHERE id=? AND store_id=${storeId(db)} AND status=? AND cancelled_at IS NULL
     AND EXISTS(SELECT 1 FROM payment WHERE order_id=? AND status='SUCCESS' AND mode='demo')
     AND NOT EXISTS(SELECT 1 FROM payment WHERE order_id=? AND (mode!='demo' OR status='PENDING'))`,
     body.reason.trim(),Number(restock),id,body.expected,id,id).run();
-  const row=await statement(db,orderSelect+' WHERE o.id=?',id).first();
+  const row=await statement(db,orderSelect+' WHERE o.id=? AND o.store_id=?',id,storeId(db)).first();
   check(row,'주문을 찾을 수 없습니다.',404);
   if(result.meta.changes || (row.cancelled_at && row.cancelled_by==='admin'))return {order:toView(row)};
   check(!row.cancelled_at && row.status===body.expected,'주문 상태가 변경되었습니다. 최신 상태를 확인해 주세요.',409,'ORDER_CHANGED');
@@ -181,9 +185,9 @@ async function reorderMenu(db,body) {
     Number.isInteger(body.revision)&&body.revision>=0,"메뉴 순서를 확인해 주세요.");
   const encoded=JSON.stringify(ids);
   const results=await db.batch([
-    db.prepare("INSERT OR IGNORE INTO menu_display_order(id) VALUES(1)"),
-    statement(db,`UPDATE menu_display_order SET menu_ids=?,revision=revision+1 WHERE id=1 AND revision=?
-      AND (SELECT count(*) FROM menu)=? AND NOT EXISTS(SELECT id FROM menu WHERE id NOT IN (SELECT value FROM json_each(?)))`,
+    db.prepare(`INSERT OR IGNORE INTO menu_display_order(id) VALUES(${storeId(db)})`),
+    statement(db,`UPDATE menu_display_order SET menu_ids=?,revision=revision+1 WHERE id=${storeId(db)} AND revision=?
+      AND (SELECT count(*) FROM menu WHERE store_id=${storeId(db)})=? AND NOT EXISTS(SELECT id FROM menu WHERE store_id=${storeId(db)} AND id NOT IN (SELECT value FROM json_each(?)))`,
       encoded,body.revision,ids.length,encoded)
   ]);
   check(results[1].meta.changes===1,"메뉴 목록 또는 순서가 변경되었습니다. 최신 목록에서 다시 정렬해 주세요.",409,"MENU_ORDER_CHANGED");
@@ -226,6 +230,7 @@ async function storePhoto(bucket, photo) {
 }
 async function saveMenu(db,env,body,id=null) {
   const entry=menuDefinition(body);
+  if(id===null&&storeId(db)!==1&&validKey(body.key))body={...body,key:await digest(storeId(db)+"/"+body.key)};
   check((await categoryState(db)).items.some(c=>c.id===entry.category),'메뉴 분류가 변경되었습니다. 다시 선택해 주세요.',409,'CATEGORIES_CHANGED');
   let groups=null;
   if(Object.hasOwn(body,"choice_groups")) {
@@ -237,32 +242,32 @@ async function saveMenu(db,env,body,id=null) {
   const statements=[];
   if(create) {
     check(validKey(body.key) && entry.options.every(o=>o.id===null),"등록 정보와 옵션을 확인해 주세요.");
-    const prev=await statement(db,"SELECT id FROM menu WHERE registration_key=?",body.key).first();
+    const prev=await statement(db,"SELECT id FROM menu WHERE registration_key=? AND store_id=?",body.key,storeId(db)).first();
     if(prev)return {id:prev.id};
-    parent="SELECT id FROM menu WHERE registration_key=? AND version=-1";
+    parent=`SELECT id FROM menu WHERE registration_key=? AND version=-1 AND store_id=${storeId(db)}`;
     args=[body.key];
   } else {
     check(Number.isInteger(body.version)&&body.version>=0,"메뉴 버전을 확인해 주세요.");
-    const old=await statement(db,"SELECT version,photo_key,choice_groups FROM menu WHERE id=?",id).first();
+    const old=await statement(db,"SELECT version,photo_key,choice_groups FROM menu WHERE id=? AND store_id=?",id,storeId(db)).first();
     check(old && old.version===body.version,"메뉴가 변경되었습니다. 다시 확인해 주세요.",409,"MENU_CHANGED");
     const allowed=new Set((await all(db,"SELECT id FROM menu_option WHERE menu_id=? AND active=1",id)).map(o=>o.id));
     check(entry.options.every(o=>o.id===null || allowed.has(o.id)),"해당 메뉴의 옵션만 수정할 수 있습니다.");
     if(groups===null)check(JSON.parse(old.choice_groups).every(g=>!g.when_extra || entry.options.some(o=>o.name===g.when_extra)),
       "선택 그룹을 편집하려면 관리자 화면을 새로고침해 주세요.",409,"MENU_CHANGED");
     existingPhoto=old.photo_key;
-    parent="SELECT id FROM menu WHERE id=? AND version=? AND "+CATEGORY_EXISTS;
+    parent="SELECT id FROM menu WHERE id=? AND version=? AND "+categoryExists(db);
     args=[id,body.version,DEFAULT_CATEGORY_JSON,entry.category];
   }
   const photo=Object.hasOwn(body,"photo")?await storePhoto(env.BUCKET,body.photo):existingPhoto;
   if(create) {
     statements.push(statement(db,`INSERT OR IGNORE INTO menu(name,description,category,kind,base_price,is_sold_out,
-      photo_key,registration_key,choice_groups,version) SELECT ?,?,?,'custom',?,?,?,?,?,-1 WHERE ${CATEGORY_EXISTS}`,
+      photo_key,registration_key,choice_groups,version,store_id) SELECT ?,?,?,'custom',?,?,?,?,?,-1,${storeId(db)} WHERE ${categoryExists(db)}`,
       entry.name,entry.description,entry.category,entry.price,entry.sold,photo,body.key,groups??"[]",DEFAULT_CATEGORY_JSON,entry.category));
-    final=statement(db,"UPDATE menu SET version=0 WHERE registration_key=? AND version=-1",body.key);
+    final=statement(db,"UPDATE menu SET version=0 WHERE registration_key=? AND version=-1 AND store_id=?",body.key,storeId(db));
   } else {
     statements.push(statement(db,`UPDATE menu_option SET active=0 WHERE menu_id=(${parent}) AND active=1`,...args));
     final=statement(db,`UPDATE menu SET name=?,description=?,category=?,base_price=?,is_sold_out=?,photo_key=?,
-      choice_groups=COALESCE(?,choice_groups),version=version+1 WHERE id=? AND version=? AND ${CATEGORY_EXISTS}`,entry.name,entry.description,entry.category,entry.price,entry.sold,photo,groups,...args);
+      choice_groups=COALESCE(?,choice_groups),version=version+1 WHERE id=? AND version=? AND ${categoryExists(db)}`,entry.name,entry.description,entry.category,entry.price,entry.sold,photo,groups,...args);
   }
   for(const option of entry.options) {
     statements.push(option.id===null
@@ -275,14 +280,26 @@ async function saveMenu(db,env,body,id=null) {
     check(results.at(-1).meta.changes===1,"메뉴가 변경되었습니다. 다시 확인해 주세요.",409,"MENU_CHANGED");
     return {id};
   }
-  const saved=await statement(db,"SELECT id FROM menu WHERE registration_key=?",body.key).first();
+  const saved=await statement(db,"SELECT id FROM menu WHERE registration_key=? AND store_id=?",body.key,storeId(db)).first();
   check(saved,'메뉴 분류가 변경되었습니다. 다시 선택해 주세요.',409,'CATEGORIES_CHANGED');return saved;
 }
 
 async function adminRoute(db,env,path,request,body) {
+  if(['/api/admin/login','/api/admin/reset-password'].includes(path)){check(storeId(db)===1&&await legacyEnabled(db),'이메일 계정으로 로그인해 주세요.',401,'ACCOUNT_LOGIN_REQUIRED');}
   if(path==='/api/admin/login'&&body)return loginAdmin(db,env,request,body);
   if(path==='/api/admin/reset-password'&&body)return resetPassword(db,request,body);
-  const hash=await requireAdmin(db,request);
+  if(path==='/api/admin/claim-account'&&body)return claimAccount(db,env,request,body);
+  const actor=await principal(db,env,request),role=await authorizeStore(db,actor);
+  if(path==='/api/admin/logout'&&body){if(actor.legacy)await statement(db,'DELETE FROM admin_session WHERE digest=?',actor.digest).run();return {ok:true};}
+  if(role==='STAFF')check(path==='/api/admin/orders'&&!body||/^\/api\/admin\/orders\/[a-f0-9]{32}$/.test(path)&&body,'점주 권한이 필요한 기능입니다.',403,'ROLE_FORBIDDEN');
+  if(path.startsWith('/api/admin/accounts')){
+    check(!actor.legacy,'이메일 계정을 먼저 연결해 주세요.',403,'ACCOUNT_LOGIN_REQUIRED');
+    if(path==='/api/admin/accounts'&&!body)return listMembers(db);
+    if(path==='/api/admin/accounts/invite'&&body)return inviteMember(db,actor,body);
+    if(path==='/api/admin/accounts/member'&&body)return changeMember(db,actor,body);
+    if(path==='/api/admin/accounts/revoke'&&body)return revokeInvitation(db,actor,body);
+  }
+  if(['/api/admin/security','/api/admin/password','/api/admin/recovery-code'].includes(path))check(actor.legacy,'이메일 계정의 비밀번호 복구를 이용해 주세요.',403,'ACCOUNT_LOGIN_REQUIRED');
   if(path==='/api/admin/promotions')return body?savePromotions(db,body):promotionState(db);
   if(path==='/api/admin/sales'&&!body)return salesReport(db,new URL(request.url).searchParams);
   if(path==='/api/admin/inventory'&&!body)return inventoryState(db);
@@ -294,24 +311,24 @@ async function adminRoute(db,env,path,request,body) {
   if(path==='/api/admin/recovery-code'&&body)return issueRecovery(db,env,request,body);
   if(path==='/api/admin/categories')return body?saveCategories(db,body):categoryState(db);
   if(path==="/api/admin/logout" && body){
-    await statement(db,"DELETE FROM admin_session WHERE digest=?",hash).run();return {ok:true};
+    return {ok:true};
   }
   if(path==="/api/admin/menu" && body)return saveMenu(db,env,body);
   if(path==="/api/admin/menu-order" && body)return reorderMenu(db,body);
   if(path==="/api/admin/menu" && !body){
     // A revision read before the catalog makes a concurrent reorder a safe conflict.
-    const sequence=await db.prepare("SELECT revision FROM menu_display_order WHERE id=1").first();
+    const sequence=await db.prepare("SELECT revision FROM menu_display_order WHERE id="+storeId(db)).first();
     return {menu:await catalog(db,true),order_revision:sequence?.revision??0,categories:(await categoryState(db)).items};
   }
   if(path==="/api/admin/orders" && !body)
-    return {orders:(await all(db,orderSelect+" WHERE o.number IS NOT NULL ORDER BY o.number DESC")).map(toView)};
+    return {orders:(await all(db,orderSelect+" WHERE o.store_id="+storeId(db)+" AND o.number IS NOT NULL ORDER BY o.number DESC")).map(toView)};
   let match=path.match(/^\/api\/admin\/menu\/(\d+)$/);
   if(match && body){
     if(Object.hasOwn(body,"name"))return saveMenu(db,env,body,Number(match[1]));
     check(Number.isInteger(body.base_price) && body.base_price>=0 && body.base_price<=1_000_000 &&
       typeof body.is_sold_out==="boolean" && Number.isInteger(body.version),"가격과 판매 상태를 확인해 주세요.");
-    const r=await statement(db,"UPDATE menu SET base_price=?,is_sold_out=?,version=version+1 WHERE id=? AND version=?",
-      body.base_price,Number(body.is_sold_out),Number(match[1]),body.version).run();
+    const r=await statement(db,"UPDATE menu SET base_price=?,is_sold_out=?,version=version+1 WHERE id=? AND version=? AND store_id=?",
+      body.base_price,Number(body.is_sold_out),Number(match[1]),body.version,storeId(db)).run();
     check(r.meta.changes===1,"메뉴가 변경되었습니다. 다시 확인해 주세요.",409,"MENU_CHANGED");return {ok:true};
   }
   match=path.match(/^\/api\/admin\/orders\/([a-f0-9]{32})\/cancel$/);
@@ -319,14 +336,14 @@ async function adminRoute(db,env,path,request,body) {
   match=path.match(/^\/api\/admin\/orders\/([a-f0-9]{32})$/);
   if(match && body){
     check(Object.hasOwn(NEXT,body.expected),"변경할 수 없는 주문 상태입니다.",409);
-    const r=await statement(db,"UPDATE orders SET status=? WHERE id=? AND status=? AND cancelled_at IS NULL",NEXT[body.expected],match[1],body.expected).run();
+    const r=await statement(db,"UPDATE orders SET status=? WHERE id=? AND status=? AND cancelled_at IS NULL AND store_id=?",NEXT[body.expected],match[1],body.expected,storeId(db)).run();
     check(r.meta.changes===1,"주문 상태가 변경되었습니다.",409,"ORDER_CHANGED");
-    return {order:toView(await statement(db,orderSelect+" WHERE o.id=?",match[1]).first())};
+    return {order:toView(await statement(db,orderSelect+" WHERE o.id=? AND o.store_id=?",match[1],storeId(db)).first())};
   }
   throw new Problem("경로를 찾을 수 없습니다.",404);
 }
 async function dispatch(request,env,path) {
-  const db=env.DB;
+  let db=env.DB;
   check(db,"매장 DB 연결을 확인해 주세요.",503);
   let body;
   if(request.method==="POST"){
@@ -338,9 +355,13 @@ async function dispatch(request,env,path) {
     try {body=JSON.parse(raw);}catch{throw new Problem("입력값을 읽을 수 없습니다.");}
     check(body && typeof body==="object" && !Array.isArray(body),"입력값을 확인해 주세요.");
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
+  if(path==='/api/auth/config'&&!body)return accountConfig(db,env);
+  if(path==='/api/account'&&!body)return accountInfo(db,await principal(db,env,request));
+  if(path==='/api/account/stores'&&body)return createStore(db,await principal(db,env,request),body);
+  const store=await resolveStore(db,request);db=storeDb(db,store.id);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
   if(path==='/api/ads'&&!body)return adState(db,true);
-  if(path==="/api/menu" && !body)return {menu:await catalog(db,true,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:"",server_time:(await db.prepare("SELECT unixepoch('now')*1000 AS now").first()).now};
+  if(path==="/api/menu" && !body)return {store,menu:await catalog(db,true,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:"",server_time:(await db.prepare("SELECT unixepoch('now')*1000 AS now").first()).now};
   const token=request.headers.get("X-Kiosk-Session");
   check(validKey(token),"고객 세션을 확인해 주세요.",401);
   const customer=await digest(token);
@@ -358,7 +379,7 @@ async function handleKiosk(request,env) {
     return Response.json({error:"허용되지 않은 출처입니다."},{status:403,headers});
   if(origin)headers["Access-Control-Allow-Origin"]=origin;
   if(request.method==="OPTIONS")return new Response(null,{status:204,headers:{...headers,
-    "Access-Control-Allow-Methods":"GET,POST,OPTIONS","Access-Control-Allow-Headers":"Content-Type,Authorization,X-Kiosk-Session",
+    "Access-Control-Allow-Methods":"GET,POST,OPTIONS","Access-Control-Allow-Headers":"Content-Type,Authorization,X-Kiosk-Session,X-Kiosk-Store",
     "Access-Control-Max-Age":"600"}});
   try{
     const path=new URL(request.url).pathname;

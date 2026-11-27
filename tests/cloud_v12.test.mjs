@@ -1,3 +1,4 @@
+import {setup} from './cloud-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
@@ -59,7 +60,7 @@ test('v1.7 additive migration preserves existing menu and paid item amounts',t=>
  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
  for(const f of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql'])db.exec(readFileSync(new URL('../cloud/'+f,import.meta.url),'utf8'));
  db.exec("INSERT INTO menu(id,name,description,kind,base_price,photo_key) VALUES(1,'이전 메뉴','','custom',5000,'original');INSERT INTO orders(id,customer,signature,total,creation_tag,status,number) VALUES('old','customer','s',5000,'tag','PAID',1);INSERT INTO order_item(id,order_id,menu_id,name,quantity,price) VALUES('item','old',1,'이전 메뉴',1,5000)");
- const before=db.prepare('SELECT * FROM order_item').get();for(const f of ['v17-migration.sql','promotion-pricing.sql'])db.exec(readFileSync(new URL('../cloud/'+f,import.meta.url),'utf8'));
+ const before=db.prepare('SELECT * FROM order_item').get();for(const f of ['v17-migration.sql','v18-migration.sql','promotion-pricing.sql'])db.exec(readFileSync(new URL('../cloud/'+f,import.meta.url),'utf8'));
  const after=db.prepare('SELECT * FROM order_item').get();for(const [k,v] of Object.entries(before))assert.equal(after[k],v);assert.equal(after.promotion,null);assert.equal(db.prepare('SELECT photo_key FROM menu').get().photo_key,'original');assert.equal(db.prepare('SELECT sale_price FROM menu_pricing').get().sale_price,5000);
 });
 
@@ -155,36 +156,6 @@ test('v1.6 sales protect private data and reject invalid and oversized ranges',a
 });
 
 // Exercise the real Worker routes and SQL with an in-memory SQLite D1 adapter.
-async function setup(t) {
-  const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
-  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql','v17-migration.sql','promotion-pricing.sql'])
-    sqlite.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
-  const DB={prepare(sql){
-    const make=args=>({sql,bind:(...values)=>make(values),
-      async all(){return {results:sqlite.prepare(sql).all(...args),meta:{changes:0}};},
-      async first(){return sqlite.prepare(sql).get(...args)??null;},
-      async run(){return {meta:{changes:Number(sqlite.prepare(sql).run(...args).changes)}};},
-      execute(){return /^\s*SELECT/i.test(sql)?{results:sqlite.prepare(sql).all(...args),meta:{changes:0}}:
-        {meta:{changes:Number(sqlite.prepare(sql).run(...args).changes)}};}
-    });return make([]);
-  },async batch(commands){sqlite.exec('BEGIN');try{const result=commands.map(c=>c.execute());sqlite.exec('COMMIT');return result;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
-  const images=new Map(),BUCKET={async put(key,bytes){images.set(key,new Uint8Array(bytes));},async get(key){return images.has(key)?{body:images.get(key)}:null;}};
-  const password='isolated-test-password', env={DB,BUCKET,KIOSK_ADMIN_HASH:createHash('sha256').update(password).digest('hex')};
-  let bearer='';
-  async function call(path,body,customer='test-customer-session-0001',admin=true){
-    const headers={'X-Kiosk-Session':customer};
-    if(bearer&&admin)headers.Authorization='Bearer '+bearer;
-    if(body!==undefined)headers['Content-Type']='application/json';
-    const response=await handleKiosk(new Request('https://test.invalid'+path,{headers,method:body===undefined?'GET':'POST',body:body===undefined?undefined:JSON.stringify(body)}),env);
-    return {status:response.status,data:await response.json()};
-  }
-  const login=await call('/api/admin/login',{password});assert.equal(login.status,200);bearer=login.data.token;
-  const menu=(await call('/api/menu')).data.menu;
-  async function create(){const item=menu[0];const result=await call('/api/orders',{key:randomUUID(),items:[{menu_id:item.id,quantity:1,options:[],expected_unit:item.base_price,expected_version:item.version}]});assert.equal(result.status,200);return result.data;}
-  const pay=(id,result='success')=>call(`/api/orders/${id}/attempts`,{key:randomUUID(),demo_result:result});
-  return {sqlite,call,menu,create,pay,env,setBearer:value=>bearer=value,getBearer:()=>bearer,password};
-}
-
 test('v1.5 advertisements create, edit, hide, reorder and delete without touching menus or orders',async t=>{
   const {call,create,env}=await setup(t),before=(await call('/api/admin/menu')).data,order=await create();
   const photo=readFileSync(new URL('../assets/menu/published/classic-burger.jpg',import.meta.url)).toString('base64');

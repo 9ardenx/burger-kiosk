@@ -1,9 +1,10 @@
+import {storeId} from './store-context.mjs';
 import {check} from './problems.mjs';
 const stmt=(db,sql,...args)=>db.prepare(sql).bind(...args);
 // Preserve the existing v1.7 cover without rewriting its photo or stored catalog.
 const placement=a=>a.placement??(a.id==='v17-new-products-banner'?'INTRO':'NORMAL');
 export async function adState(db,publicOnly=false){
-  const row=await db.prepare('SELECT items,revision FROM ad_catalog WHERE id=1').first();
+  const row=await db.prepare(`SELECT items,revision FROM ad_catalog WHERE id=${storeId(db)}`).first();
   const items=JSON.parse(row?.items??'[]').map(a=>({...a,placement:placement(a)}));return {items:publicOnly?items.filter(a=>a.enabled):items,revision:row?.revision??0};
 }
 export async function saveAds(db,bucket,body){
@@ -29,8 +30,8 @@ export async function saveAds(db,bucket,body){
   }
   check(new Set(cleaned.map(a=>a.id)).size===cleaned.length,'광고가 중복되었습니다.');
   check(cleaned.filter(a=>a.placement==='INTRO').length<=1,'첫 화면 소식은 하나만 지정할 수 있습니다. 기존 소식의 노출 위치를 먼저 변경해 주세요.');
-  const results=await db.batch([db.prepare('INSERT OR IGNORE INTO ad_catalog(id) VALUES(1)'),
-    stmt(db,'UPDATE ad_catalog SET items=?,revision=revision+1 WHERE id=1 AND revision=?',JSON.stringify(cleaned),body.revision)]);
+  const results=await db.batch([db.prepare(`INSERT OR IGNORE INTO ad_catalog(id) VALUES(${storeId(db)})`),
+    stmt(db,`UPDATE ad_catalog SET items=?,revision=revision+1 WHERE id=${storeId(db)} AND revision=?`,JSON.stringify(cleaned),body.revision)]);
   check(results[1].meta.changes===1,'광고가 변경되었습니다. 최신 목록에서 다시 수정해 주세요.',409,'ADS_CHANGED');
   return {items:cleaned,revision:body.revision+1};
 }

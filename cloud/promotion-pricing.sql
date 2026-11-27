@@ -2,16 +2,16 @@
 CREATE VIEW IF NOT EXISTS active_promotions AS
 WITH clock AS (SELECT datetime('now','+9 hours') AS local_now),
 raw AS (
- SELECT p.value AS payload, json_extract(p.value,'$.id') AS id,
+ SELECT c.id AS store_id,p.value AS payload, json_extract(p.value,'$.id') AS id,
    json_extract(p.value,'$.start_time') AS starts, json_extract(p.value,'$.end_time') AS ends,
    local_now, strftime('%H:%M',local_now) AS local_time
  FROM promotion_catalog c,json_each(c.items) p,clock
- WHERE c.id=1 AND json_extract(p.value,'$.enabled')=1
+ WHERE json_extract(p.value,'$.enabled')=1
 ), anchored AS (
  SELECT *,CASE WHEN starts>ends AND local_time<ends THEN date(local_now,'-1 day') ELSE date(local_now) END AS anchor_date
  FROM raw
 )
-SELECT payload,id,
+SELECT store_id,payload,id,
  datetime(date(anchor_date,CASE WHEN starts>ends OR ends='24:00' THEN '+1 day' ELSE '+0 day' END)||' '||
    CASE WHEN ends='24:00' THEN '00:00' ELSE ends END||':00','-9 hours') AS ends_at
 FROM anchored
@@ -27,7 +27,7 @@ WITH candidates AS (
    THEN CAST(m.base_price*(100-json_extract(p.payload,'$.value'))/100 AS INTEGER)
    ELSE json_extract(p.payload,'$.value') END AS discounted
  FROM menu m JOIN active_promotions p
-  ON m.id IN (SELECT value FROM json_each(json_extract(p.payload,'$.menu_ids')))
+  ON m.store_id=p.store_id AND m.id IN (SELECT value FROM json_each(json_extract(p.payload,'$.menu_ids')))
 ), ranked AS (
  SELECT *,row_number() OVER (PARTITION BY id ORDER BY discounted,json_extract(payload,'$.id')) AS rank
  FROM candidates WHERE discounted<base_price

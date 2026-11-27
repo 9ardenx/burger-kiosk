@@ -1,15 +1,20 @@
-import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261127-v173';
-import {handleVariantButton} from "./group-editor.js?v=20261127-v173";
-import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261127-v173";
-import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261127-v173";
-import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261127-v173";
-import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261127-v173';
-import {adList,adEditor} from './advertising-ui.js?v=20261127-v173';
-import {diningName} from './welcome.js?v=20261127-v173';
-import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261127-v173';
-import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261127-v173";
+import {configureAccountAuth,rememberAccount,clearAccount,signInEmail,registerEmail,sendVerification,sendPasswordReset} from './account-client.js?v=20261127-v18';
+import {accountLoginView,accountSettingsView,storeBar} from './accounts-ui.js?v=20261127-v18';
+import {getStoreId,selectStore} from './backend.js?v=20261127-v18';
+import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261127-v18';
+import {handleVariantButton} from "./group-editor.js?v=20261127-v18";
+import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261127-v18";
+import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261127-v18";
+import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261127-v18";
+import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261127-v18';
+import {adList,adEditor} from './advertising-ui.js?v=20261127-v18';
+import {diningName} from './welcome.js?v=20261127-v18';
+import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261127-v18';
+import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261127-v18";
 
-const tabs=document.querySelector("#tabs");
+const tabs=document.querySelector('#tabs');
+let authSettings={enabled:false,legacy_enabled:true},identity=null,memberRecords={members:[],invitations:[]};
+const isStaff=()=>identity?.stores.find(s=>s.id===getStoreId())?.role==='STAFF';
 const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료",CANCELLED:"직권취소"};
 const cancelDialog=document.querySelector('#admin-cancel-dialog');
 const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 완료"};
@@ -50,12 +55,14 @@ async function refreshPhotoPreview(form) {
   }
 }
 function closeEditor(){promotionEdit=null;resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;inventoryEdit=null;}
-function login(recovery=false) {
+function login(recovery=false,legacy=false) {
+  identity=null;
   cancelDialog.close();
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
   closeEditor();
   clearInterval(timer);
   tabs.hidden=true;
+  if(authSettings.enabled&&!legacy){app.innerHTML=accountLoginView(recovery?'reset':'login',authSettings.legacy_enabled);return;}
   if(recovery){app.innerHTML=resetView();return;}
   app.innerHTML=`<div class="login panel"><h1>관리자 로그인</h1><p class="muted">매장 메뉴와 주문을 관리합니다.</p>
     <form id="login"><label>관리자 암호<input type="password" name="password" autocomplete="current-password" required></label>
@@ -98,7 +105,7 @@ function patchOrders() {
       row.innerHTML=`<button class="num-link" data-detail="${o.id}" aria-label="주문 ${o.number} 상세">${String(o.number).padStart(3,"0")}</button>
         <div><span class="dining-tag ${o.dining_type==='TAKEOUT'?'takeout':''}">${diningName(o.dining_type)}</span><strong>${escapeText(o.items[0].name)}${o.items.length>1?" 외 "+(o.items.length-1)+"종":""}</strong><small>${o.items.reduce((s,i)=>s+i.quantity,0)}개 · ${money(o.total)}</small></div>
         <span class="status ${o.status.toLowerCase()}">${states[o.status]}</span>${nextLabels[o.status]?`<div class="order-actions"><button class="primary compact" data-next="${o.id}" data-status="${o.status}">${nextLabels[o.status]}</button>
-        <button class="danger-outline compact" data-cancel-order="${o.id}" aria-label="${String(o.number).padStart(3,'0')}번 주문 직권취소">직권취소</button></div>`:"<span>—</span>"}`;
+        ${isStaff()?'':`<button class="danger-outline compact" data-cancel-order="${o.id}" aria-label="${String(o.number).padStart(3,'0')}번 주문 직권취소">직권취소</button>`}</div>`:"<span>—</span>"}`;
       row.dataset.record=signature;
     }
     if(host.children[index]!==row)host.insertBefore(row,host.children[index]??null);
@@ -116,13 +123,22 @@ function patchOrders() {
 }
 function render() {
   tabs.hidden=false;
-  tabs.innerHTML=Object.entries({orders:'주문 현황',sales:'매출 분석',inventory:'재고 관리',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',promotions:'할인 관리',security:'암호 관리'}).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
-  app.innerHTML=current==='promotions'?promotionView(promotions,menu,promotionEdit):current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
+  tabs.innerHTML=Object.entries({orders:'주문 현황',sales:'매출 분석',inventory:'재고 관리',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',promotions:'할인 관리',security:'암호 관리',...(authSettings.enabled?{accounts:'계정 관리'}:{})}).filter(([id])=>!(id==='security'&&identity&&!identity.legacy)&&(!isStaff()||id==='orders')).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
+  app.innerHTML=current==='accounts'?accountSettingsView(identity,memberRecords):current==='promotions'?promotionView(promotions,menu,promotionEdit):current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
+  if(identity)app.insertAdjacentHTML('afterbegin',storeBar(identity,getStoreId()));
   if(current==="orders")patchOrders();
   if(current==='promotions'&&promotionEdit)promotionPreview(app.querySelector('#promotion-editor'),menu);
   setRequestState(busy);
 }
 async function refresh() {
+  if(authSettings.enabled&&!identity){
+    try{identity=await api('/api/account');}
+    catch(error){if(error.status===403){clearAccount();login();}throw error;}
+    if(!identity.stores.length){login();throw new Error('연결된 매장이 없습니다. 점주에게 계정 등록을 요청해 주세요.');}
+    if(!identity.stores.some(s=>s.id===getStoreId())){selectStore(identity.stores[0].id);return;}
+    if(isStaff()&&current!=='orders'||!identity.legacy&&current==='security')current='orders';
+  }
+  if(current==='accounts'){memberRecords=identity.legacy?{members:[],invitations:[]}:await api('/api/admin/accounts');render();return;}
   if(current==='promotions'){const [p,m]=await Promise.all([api('/api/admin/promotions'),api('/api/admin/menu')]);promotions=p;menu=m.menu;render();return;}
   if(current==='sales'){sales=await api('/api/admin/sales?'+new URLSearchParams(salesPeriod));render();return;}
   if(current==='inventory'){inventory=await api('/api/admin/inventory');render();return;}
@@ -214,6 +230,22 @@ document.addEventListener("submit",event=>{
   }
   act(async()=>{
     const data=new FormData(form);
+    if(form.id==='email-login'){
+      rememberAccount(await signInEmail(data.get('email'),data.get('password')));identity=null;current='orders';await refresh();poll();return;
+    }
+    if(form.id==='email-signup'){
+      await registerEmail(data.get('email'),data.get('password'));form.reset();app.innerHTML=accountLoginView('login',authSettings.legacy_enabled);notice('인증메일을 보냈습니다. 이메일의 링크를 확인한 뒤 로그인해 주세요.');return;
+    }
+    if(form.id==='email-reset'){
+      await sendPasswordReset(data.get('email'));notice('가입된 이메일이면 재설정 안내가 발송됩니다. 받은편지함과 스팸함을 확인해 주세요.');return;
+    }
+    if(form.id==='claim-account'){
+      const account=await signInEmail(data.get('email'),data.get('password'));
+      await api('/api/admin/claim-account',{id_token:account.idToken});rememberAccount(account);authSettings.legacy_enabled=false;identity=null;current='orders';await refresh();poll();notice('기존 매장을 이메일 계정에 연결했습니다. 다음부터 이메일로 로그인해 주세요.');return;
+    }
+    if(form.id==='invite-account'){await api('/api/admin/accounts/invite',{email:data.get('email'),role:data.get('role')});await refresh();notice('초대를 등록했습니다. 구성원에게 관리자 화면 주소와 가입할 이메일을 알려 주세요.');return;}
+    if(form.hasAttribute('data-member')){await api('/api/admin/accounts/member',{uid:form.dataset.member,revision:Number(form.dataset.revision),role:data.get('role'),enabled:data.has('enabled')});identity=null;await refresh();notice('권한을 변경했습니다. 다음 요청부터 적용됩니다.');return;}
+    if(form.id==='create-store'){const result=await api('/api/account/stores',{name:data.get('name')});selectStore(result.store.id);return;}
     if(form.id==='promotion-editor'){const p=promotionData(form,promotionEdit.id),items=promotions.items.map(x=>x.id===p.id?p:x);if(promotionEdit.isNew)items.push(p);await savePromotionCatalog(items);notice('할인 예약을 저장했습니다. 설정한 시간에 자동으로 적용됩니다.');return;}
     if(form.id==='sales-period'){
       salesPeriod={from:data.get('from'),to:data.get('to')};await refresh();return;
@@ -258,6 +290,16 @@ document.addEventListener("submit",event=>{
 });
 document.addEventListener("click",event=>{
   const b=event.target.closest("button");
+  if(b&&!busy){
+    if(b.dataset.accountMode){app.innerHTML=accountLoginView(b.dataset.accountMode,authSettings.legacy_enabled);notice();return;}
+    if(b.hasAttribute('data-legacy-login')){clearAccount();login(false,true);return;}
+    if(b.hasAttribute('data-register-owner')||b.hasAttribute('data-verify-owner')||b.hasAttribute('data-verify-email')){
+      const form=b.closest('form')??app.querySelector('form');if(!form.reportValidity())return;
+      act(async()=>{const data=new FormData(form);await (b.hasAttribute('data-register-owner')?registerEmail:sendVerification)(data.get('email'),data.get('password'));form.elements.password.value='';notice('인증메일을 보냈습니다. 링크를 확인한 뒤 비밀번호를 다시 입력해 주세요.');});return;
+    }
+    if(b.hasAttribute('data-reset-own')){act(async()=>{await sendPasswordReset(identity.email);notice('비밀번호 재설정 안내를 이메일로 보냈습니다.');});return;}
+    if(b.dataset.revokeInvite){act(async()=>{await api('/api/admin/accounts/revoke',{id:b.dataset.revokeInvite});await refresh();});return;}
+  }
   if(!b || b.disabled || b.type==="submit" && b.closest("form"))return;
 if(busy)return;
   if(b.hasAttribute('data-new-promotion')||b.dataset.editPromotion){promotionEdit=b.dataset.editPromotion?structuredClone(promotions.items.find(p=>p.id===b.dataset.editPromotion)):{id:crypto.randomUUID(),isNew:true,title:'',enabled:true,mode:'PERCENT',value:10,weekdays:[0,1,2,3,4,5,6],menu_ids:[],start_time:'11:00',end_time:'14:00',start_date:null,end_date:null};render();return;}
@@ -342,9 +384,17 @@ if(busy)return;
     else if(b.dataset.act==="logout"){await api("/api/admin/logout",{});login();}
   });
 });
-act(async()=>{await refresh();poll();},true);
+act(async()=>{
+  try{authSettings=await api('/api/auth/config');}catch(e){if(e.status!==404)throw e;}
+  configureAccountAuth(authSettings);await refresh();poll();
+},true);
 
 document.addEventListener("change",event=>{
+  if(event.target.id==='account-store'){
+    if(busy){event.target.value=String(getStoreId());return;}
+    if((editor||adEdit||promotionEdit||inventoryEdit||orderDirty()||categoriesDirty())&&!confirm('작성 중인 내용을 버리고 매장을 바꿀까요?')){event.target.value=String(getStoreId());return;}
+    selectStore(Number(event.target.value));return;
+  }
   const adForm=event.target.closest('#ad-editor');if(adForm){adDirty=true;if(event.target.name==='ad-photo'){adForm.elements['ad-x'].value=50;adForm.elements['ad-y'].value=50;adForm.querySelector('.ad-crop').hidden=false;void refreshAdPreview(adForm);}return;}
   const form=event.target.closest("#menu-editor");if(!form||!editor)return;
   const image=form.querySelector("#photo-preview");

@@ -1,14 +1,20 @@
+import {accountToken,clearAccount} from './account-client.js?v=20261127-v18';
 const API_ORIGIN = "https://burger-kiosk-9ardenx-api.epicowl12.chatgpt.site";
 const keyPrefix = "burger-kiosk.cloud.v1.";
+export function getStoreId(){const value=new URL(location.href).searchParams.get('store')??'1';return /^[1-9]\d{0,8}$/.test(value)?Number(value):1;}
+export function selectStore(id){const url=new URL(location.href);url.searchParams.set('store',String(id));location.assign(url.href);}
+for(const link of document.querySelectorAll('.mast a[href]')){const url=new URL(link.href);if(url.origin===location.origin){url.searchParams.set('store',String(getStoreId()));link.href=url.href;}}
 function customerKey() {
-  let key=sessionStorage.getItem(keyPrefix+"customer");
-  if(!key){key=crypto.randomUUID()+crypto.randomUUID();sessionStorage.setItem(keyPrefix+"customer",key);}
+  let key=sessionStorage.getItem(keyPrefix+"customer"+(getStoreId()===1?"":"."+getStoreId()));
+  if(!key){key=crypto.randomUUID()+crypto.randomUUID();sessionStorage.setItem(keyPrefix+"customer"+(getStoreId()===1?"":"."+getStoreId()),key);}
   return key;
 }
 async function api(path,body) {
-  const headers={"X-Kiosk-Session":customerKey()};
+  const headers={"X-Kiosk-Session":customerKey(),"X-Kiosk-Store":String(getStoreId())};
   const token=sessionStorage.getItem(keyPrefix+"staff");
-  if(path.startsWith("/api/admin/") && token)headers.Authorization="Bearer "+token;
+  const protectedPath=path.startsWith('/api/admin/')||path.startsWith('/api/account');
+  const account=protectedPath&&!['/api/admin/login','/api/admin/claim-account'].includes(path)?await accountToken():null;
+  if(protectedPath&&(account||token))headers.Authorization='Bearer '+(account||token);
   if(body!==undefined)headers["Content-Type"]="application/json";
   let response, data;
   try {
@@ -21,11 +27,11 @@ async function api(path,body) {
     throw new Error("매장 서버에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.");
   }
   if(!response.ok){
-    if(response.status===401 && path.startsWith("/api/admin/"))sessionStorage.removeItem(keyPrefix+"staff");
+    if(response.status===401&&protectedPath){sessionStorage.removeItem(keyPrefix+'staff');clearAccount();}
     throw Object.assign(new Error(data.error||"요청을 처리하지 못했습니다."),{status:response.status,code:data.code});
   }
-  if(path==="/api/admin/login" && data.token) sessionStorage.setItem(keyPrefix+"staff",data.token);
-  if(path==="/api/admin/logout") sessionStorage.removeItem(keyPrefix+"staff");
+  if(path==='/api/admin/login'&&data.token){clearAccount();sessionStorage.setItem(keyPrefix+'staff',data.token);}
+  if(path==='/api/admin/logout'){clearAccount();sessionStorage.removeItem(keyPrefix+'staff');}
   return data;
 }
 export { api };

@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, uniqueIndex, index, check } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, uniqueIndex, index, check, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 export const menus = sqliteTable("menu", {
@@ -6,8 +6,8 @@ export const menus = sqliteTable("menu", {
   kind: text().notNull(), base_price: integer().notNull(), is_sold_out: integer().notNull().default(0),
   choice_groups: text().notNull().default("[]"),
   category: text().notNull().default("burger"), photo_key: text(), registration_key: text().unique(),
-  version: integer().notNull().default(0)
-});
+  version: integer().notNull().default(0), store_id: integer().notNull().default(1)
+},t=>[index('menu_by_store').on(t.store_id,t.id)]);
 export const options = sqliteTable("menu_option", {
   id: integer().primaryKey(), menu_id: integer().notNull().references(() => menus.id),
   name: text().notNull(), extra_price: integer().notNull(), active: integer().notNull().default(1)
@@ -15,10 +15,10 @@ export const options = sqliteTable("menu_option", {
 export const orders = sqliteTable("orders", {
   id: text().primaryKey(), customer: text().notNull(), signature: text().notNull(),
   total: integer().notNull(), status: text().notNull().default("PENDING_PAYMENT"),
-  number: integer().unique(), created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`), cancelled_at: text(),
+  number: integer(), created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`), cancelled_at: text(),
   cancelled_by: text(), cancel_reason: text(), dining_type: text(), restock_on_cancel: integer(),
-  creation_tag: text().notNull()
-});
+  creation_tag: text().notNull(), store_id: integer().notNull().default(1)
+},t=>[index('orders_by_store').on(t.store_id,t.created_at),uniqueIndex('orders_store_number_unique').on(t.store_id,t.number)]);
 export const items = sqliteTable("order_item", {
   id: text().primaryKey(), order_id: text().notNull().references(() => orders.id),
   menu_id: integer().notNull().references(() => menus.id), name: text().notNull(),
@@ -72,3 +72,22 @@ export const inventoryMovement = sqliteTable('inventory_movement', {
   before_quantity: integer().notNull(), after_quantity: integer().notNull(), reason: text().notNull(),
   created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`)
 },t=>[uniqueIndex('inventory_order_movement').on(t.order_id,t.menu_id,t.kind)]);
+
+export const stores = sqliteTable('store', {
+ id:integer().primaryKey({autoIncrement:true}),name:text().notNull(),enabled:integer().notNull().default(1),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
+});
+export const staffAccounts = sqliteTable('staff_account', {
+ uid:text().primaryKey(),email:text().notNull(),platform_role:text().notNull().default('USER'),enabled:integer().notNull().default(1),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
+},t=>[check('account_role',sql`${t.platform_role} IN ('USER','HQ')`)]);
+export const storeMembers = sqliteTable('store_member', {
+ store_id:integer().notNull().references(()=>stores.id),uid:text().notNull().references(()=>staffAccounts.uid),role:text().notNull(),enabled:integer().notNull().default(1),revision:integer().notNull().default(0)
+},t=>[primaryKey({columns:[t.store_id,t.uid]}),check('member_role',sql`${t.role} IN ('OWNER','STAFF')`)]);
+export const invitations = sqliteTable('store_invitation', {
+ id:text().primaryKey(),store_id:integer().notNull().references(()=>stores.id),email:text().notNull(),role:text().notNull(),created_by:text().notNull(),expires:integer().notNull(),accepted_uid:text(),revoked:integer().notNull().default(0),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
+},t=>[index('invitations_by_email').on(t.email,t.expires),check('invitation_role',sql`${t.role} IN ('OWNER','STAFF')`)]);
+export const accountAudit=sqliteTable('account_audit',{
+ id:integer().primaryKey({autoIncrement:true}),store_id:integer(),actor:text().notNull(),action:text().notNull(),target:text().notNull(),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
+});
+export const accountPolicy=sqliteTable('account_policy',{
+ id:integer().primaryKey(),legacy_disabled:integer().notNull().default(0)
+});

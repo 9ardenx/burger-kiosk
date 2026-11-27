@@ -105,7 +105,7 @@ def initialize(path):
 
     with closing(sqlite3.connect(path)) as db:
         db.executescript((Path(__file__).resolve().parents[1] / 'cloud/inventory-triggers.sql').read_text(encoding='utf-8'))
-        db.executescript((Path(__file__).resolve().parents[1] / 'cloud/promotion-pricing.sql').read_text(encoding='utf-8').replace('i.price', 'i.item_price'))
+        db.executescript((Path(__file__).resolve().parents[1] / 'cloud/promotion-pricing.sql').read_text(encoding='utf-8').replace('i.price', 'i.item_price').replace('m.store_id=p.store_id AND ', ''))
 
 
 def menu_list(db, *, all_items=False, public=False):

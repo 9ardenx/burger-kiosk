@@ -16,3 +16,6 @@ export async function api(path, body) {
 
 export const photoUrl = key => "/api/menu-photos/"+key;
 export const adPhotoUrl = key => '/api/ad-photos/'+key;
+
+export const getStoreId=()=>1;
+export const selectStore=()=>{};

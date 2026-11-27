@@ -28,7 +28,7 @@ class Version17Tests(unittest.TestCase):
         # Test-only clock: no production endpoint or environment override exists.
         sql=(Path(__file__).resolve().parents[1]/'cloud/promotion-pricing.sql').read_text(encoding='utf8')
         with connection(self.path,write=True) as db:
-            db.executescript('DROP VIEW menu_pricing;DROP VIEW active_promotions;'+sql.replace("datetime('now','+9 hours')",f"datetime('{when}')").replace('i.price','i.item_price'))
+            db.executescript('DROP VIEW menu_pricing;DROP VIEW active_promotions;'+sql.replace("datetime('now','+9 hours')",f"datetime('{when}')").replace('i.price','i.item_price').replace('m.store_id=p.store_id AND ',''))
 
     def price(self):
         with connection(self.path) as db:return menu_list(db,all_items=True,public=True)[0]

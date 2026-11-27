@@ -1,3 +1,4 @@
+import {storeId} from './store-context.mjs';
 import {check} from './problems.mjs';
 const DAY=86400000,OFFSET=9*3600000;
 const dayOf=value=>new Date(Date.parse(value.replace(' ','T')+'Z')+OFFSET).toISOString().slice(0,10);
@@ -37,7 +38,7 @@ export async function salesReport(db,params) {
       'options',json((SELECT json_group_array(json_object('option_price',x.option_price)) FROM order_item_option x WHERE x.item_id=i.id)),
       'variants',json(i.choice_snapshot))) FROM order_item i WHERE i.order_id=o.id) AS items
     FROM orders o JOIN payment p ON p.order_id=o.id AND p.status='SUCCESS'
-    WHERE (p.created_at>=? AND p.created_at<?) OR (o.cancelled_at>=? AND o.cancelled_at<?) ORDER BY p.created_at,o.id`)
+    WHERE o.store_id=${storeId(db)} AND ((p.created_at>=? AND p.created_at<?) OR (o.cancelled_at>=? AND o.cancelled_at<?)) ORDER BY p.created_at,o.id`)
     .bind(range.start,range.end,range.start,range.end).all();
   return summarizeSales(results.map(o=>({...o,items:JSON.parse(o.items).map(i=>({...i,options:[...i.options,...i.variants]}))})),range);
 }
