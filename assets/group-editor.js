@@ -1,5 +1,5 @@
-import {escapeText, notice} from "./common.js?v=20261128-v111";
-import {MAX_DEPTH, MAX_GROUPS, MAX_CHOICES} from "./choice-rules.js?v=20261128-v111";
+import {escapeText, notice} from "./common.js?v=20261128-v112";
+import {MAX_DEPTH, MAX_GROUPS, MAX_CHOICES} from "./choice-rules.js?v=20261128-v112";
 function newChoice() {return {id:crypto.randomUUID(),name:"",extra_price:0,children:[]};}
 function newGroup() {return {id:crypto.randomUUID(),name:"",required:true,choices:[newChoice(),newChoice()]};}
 function choiceHtml(choice,depth) {

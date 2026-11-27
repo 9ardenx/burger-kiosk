@@ -1,25 +1,27 @@
-import {franchiseView} from './franchise-ui.js?v=20261128-v111';
-import {profileView,updateNamePreview} from './store-profile-ui.js?v=20261128-v111';
-import {hqSalesView} from './hq-sales-ui.js?v=20261128-v111';
-import {materialView,storeSupplyView,hqSupplyView} from './supply-ui.js?v=20261128-v111';
-import {configureAccountAuth,rememberAccount,clearAccount,signInEmail,registerEmail,sendVerification,sendPasswordReset} from './account-client.js?v=20261128-v111';
-import {accountLoginView,accountSettingsView,storeBar} from './accounts-ui.js?v=20261128-v111';
-import {getStoreId,selectStore} from './backend.js?v=20261128-v111';
-import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261128-v111';
-import {handleVariantButton} from "./group-editor.js?v=20261128-v111";
-import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261128-v111";
-import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261128-v111";
-import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261128-v111";
-import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261128-v111';
-import {adList,adEditor} from './advertising-ui.js?v=20261128-v111';
-import {diningName} from './welcome.js?v=20261128-v111';
-import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261128-v111';
-import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261128-v111";
+import {franchiseView} from './franchise-ui.js?v=20261128-v112';
+import {workspaceRoute,workspaceTabs,parentTab,directStores} from './workspace.js?v=20261128-v112';
+import {workspaceBar,hqHomeView,hqAccountsView,hqStoreContext} from './workspace-ui.js?v=20261128-v112';
+import {profileView,updateNamePreview} from './store-profile-ui.js?v=20261128-v112';
+import {hqSalesView} from './hq-sales-ui.js?v=20261128-v112';
+import {materialView,storeSupplyView,hqSupplyView} from './supply-ui.js?v=20261128-v112';
+import {configureAccountAuth,rememberAccount,clearAccount,signInEmail,registerEmail,sendVerification,sendPasswordReset} from './account-client.js?v=20261128-v112';
+import {accountLoginView,accountSettingsView,storeBar} from './accounts-ui.js?v=20261128-v112';
+import {getStoreId,selectStore} from './backend.js?v=20261128-v112';
+import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261128-v112';
+import {handleVariantButton} from "./group-editor.js?v=20261128-v112";
+import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261128-v112";
+import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261128-v112";
+import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261128-v112";
+import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261128-v112';
+import {adList,adEditor} from './advertising-ui.js?v=20261128-v112';
+import {diningName} from './welcome.js?v=20261128-v112';
+import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261128-v112';
+import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261128-v112";
 
 const tabs=document.querySelector('#tabs');
 let authSettings={enabled:false,legacy_enabled:true},identity=null,memberRecords={members:[],invitations:[]},franchises={stores:[]};
-const initialTab=['orders','menu','accounts','franchise','inventory','promotions','storeinfo','hqsales','materials','supplies','hqsupply'].includes(location.hash.slice(1))?location.hash.slice(1):null;
-let landingChosen=Boolean(initialTab);
+const initialTab=location.hash.slice(1)||null;
+let workspace=new URL(location.href).searchParams.get('workspace'),freshLogin=false;
 const isStaff=()=>identity?.stores.find(s=>s.id===getStoreId())?.role==='STAFF';
 const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료",CANCELLED:"직권취소"};
 const cancelDialog=document.querySelector('#admin-cancel-dialog');
@@ -67,7 +69,10 @@ async function refreshPhotoPreview(form) {
 function closeEditor(){promotionEdit=null;resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;inventoryEdit=null;materialEdit=null;ingredientEdit=null;supplyDetail=null;}
 function login(recovery=false,legacy=false) {
   identity=null;
-  landingChosen=false;
+  freshLogin=true;
+  document.title='관리자 로그인 · 버거 키오스크';
+  document.querySelector('.brand').lastChild.textContent='관리자 로그인';
+  document.querySelector('.header-link').hidden=true;
   cancelDialog.close();
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
   closeEditor();
@@ -134,12 +139,23 @@ function patchOrders() {
 }
 function render() {
   tabs.hidden=false;
-  tabs.innerHTML=Object.entries({...(identity?.platform_role==='HQ'?{franchise:'본사 관리',hqsales:'통합 매출',hqsupply:'본사 발주 취합'}:{}),orders:'주문 현황',sales:'매출 분석',inventory:'재고 관리',materials:'재료 재고',supplies:'재료 발주·입고',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',promotions:'할인 관리',security:'암호 관리',...(authSettings.enabled?{storeinfo:'매장 정보',accounts:'계정 관리'}:{})}).filter(([id])=>!(id==='security'&&identity&&!identity.legacy)&&(!isStaff()||id==='orders')).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
+  const title=workspace==='hq'?'본사 관리':isStaff()?'직원 주문 관리':'매장 운영';
+  document.title=title+' · 버거 키오스크';
+  const brand=document.querySelector('.brand');brand.lastChild.textContent=title;
+  const brandUrl=new URL('admin.html',location.href);brandUrl.searchParams.set('v','20261128-v112');if(workspace==='store'){brandUrl.searchParams.set('workspace','store');brandUrl.searchParams.set('store',String(getStoreId()));}brand.href=brandUrl.href;
+  document.querySelector('.header-link').hidden=workspace==='hq';
+  tabs.innerHTML=Object.entries(workspaceTabs(identity??{legacy:true},workspace)).filter(([id])=>(authSettings.enabled||!['accounts','storeinfo'].includes(id))&&(!isStaff()||id==='orders')).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${(workspace==='hq'?parentTab(current):current)===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
   app.innerHTML=current==='hqsales'?hqSalesView(hqReport,hqPeriod,hqStores):current==='storeinfo'?profileView(storeDetails,identity?.platform_role==='HQ'):current==='franchise'?franchiseView(franchises):current==='accounts'?accountSettingsView(identity,memberRecords,getStoreId()):current==='promotions'?promotionView(promotions,menu,promotionEdit):current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
   if(current==='materials')app.innerHTML=materialView(materials,materialEdit);
   if(current==='supplies')app.innerHTML=storeSupplyView(supplyData,materials.items,supplyKey,supplyDetail,receiptKey);
   if(current==='hqsupply')app.innerHTML=hqSupplyView(supplyData,ingredientEdit,supplyDetail,receiptKey);
-  if(identity&&!['franchise','hqsales','hqsupply'].includes(current))app.insertAdjacentHTML('afterbegin',storeBar(identity,getStoreId()));
+  if(current==='hqhome')app.innerHTML=hqHomeView(identity,franchises);
+  if(current==='hqaccounts')app.innerHTML=hqAccountsView(identity,franchises);
+  if(identity){
+    if(workspace==='store')app.insertAdjacentHTML('afterbegin',storeBar(identity,getStoreId()));
+    else if(['accounts','storeinfo'].includes(current))app.insertAdjacentHTML('afterbegin',hqStoreContext(identity,getStoreId(),current));
+    app.insertAdjacentHTML('afterbegin',workspaceBar(identity,workspace,getStoreId(),current));
+  }
   if(current==="orders")patchOrders();
   if(current==='promotions'&&promotionEdit)promotionPreview(app.querySelector('#promotion-editor'),menu);
   setRequestState(busy);
@@ -148,13 +164,14 @@ async function refresh() {
   if(authSettings.enabled&&!identity){
     try{identity=await api('/api/account');}
     catch(error){if(error.status===403){clearAccount();login();}throw error;}
-    if(!identity.stores.length){login();throw new Error('연결된 매장이 없습니다. 점주에게 계정 등록을 요청해 주세요.');}
-    if(!identity.stores.some(s=>s.id===getStoreId())){selectStore(identity.stores[0].id);return;}
-    if(!landingChosen){current=identity.platform_role==='HQ'?'franchise':!isStaff()&&identity.stores.find(s=>s.id===getStoreId())?.address_pending?'storeinfo':'orders';landingChosen=true;}
-    if(isStaff()&&current!=='orders'||!identity.legacy&&current==='security'||['franchise','hqsales','hqsupply'].includes(current)&&identity.platform_role!=='HQ')current='orders';
-    if(identity.platform_role!=='HQ'&&!isStaff()&&identity.stores.find(s=>s.id===getStoreId())?.address_pending)current='storeinfo';
+    if(!identity.stores.length&&identity.platform_role!=='HQ'){login();throw new Error('연결된 매장이 없습니다. 점주에게 계정 등록을 요청해 주세요.');}
   }
-  if(current==='franchise'){franchises=await api('/api/account/stores');render();return;}
+  if(identity){
+    const route=workspaceRoute(identity,{workspace,tab:current,storeId:getStoreId(),freshLogin});freshLogin=false;workspace=route.workspace;current=route.tab;
+    if(route.storeId!==null&&route.storeId!==getStoreId()&&(workspace==='store'||['accounts','storeinfo'].includes(current))){selectStore(route.storeId,current,workspace);return;}
+    const url=new URL(location.href);url.searchParams.set('workspace',workspace);url.hash=current;history.replaceState(null,'',url);
+  }
+  if(['hqhome','hqaccounts','franchise'].includes(current)){franchises=await api('/api/account/stores');render();return;}
   if(current==='materials'){materials=await api('/api/admin/ingredients');render();return;}
   if(current==='supplies'){const [orders,stock]=await Promise.all([api('/api/admin/supply?'+new URLSearchParams(supplyFilter)),api('/api/admin/ingredients')]);supplyData=orders;materials=stock;render();return;}
   if(current==='hqsupply'){supplyData=await api('/api/account/supply?'+new URLSearchParams(supplyFilter));render();return;}
@@ -219,6 +236,10 @@ function setRequestState(pending) {
     button.disabled = pending;
   }
 }
+function allowWorkspaceNavigation(){
+  const dirty=editor||adDirty||promotionEdit||inventoryEdit||materialEdit||ingredientEdit||(current==='menu'&&orderDirty())||(current==='categories'&&categoriesDirty());
+  return !dirty||confirm('저장하지 않은 입력을 버리고 화면을 전환할까요?');
+}
 async function act(task, silent=false) {
   if(busy)return;
   busy=true;setRequestState(true);if(!silent)notice();
@@ -252,13 +273,14 @@ document.addEventListener("submit",event=>{
   }
   act(async()=>{
     const data=new FormData(form);
+    if(form.id==='open-direct-store'){selectStore(Number(data.get('store')),'orders','store');return;}
     if(form.id==='ingredient-editor'){const id=form.dataset.id;await api('/api/account/supply/ingredients'+(id?'/'+id:''),{key:data.get('key'),name:data.get('name'),active:data.has('active'),revision:Number(form.dataset.revision),...(id?{}:{unit:data.get('unit'),pack_label:data.get('pack_label'),pack_size:Number(data.get('pack_size'))})});ingredientEdit=null;await refresh();notice('공급 재료를 저장했습니다.');return;}
     if(form.id==='material-stock'){await api('/api/admin/ingredients/'+form.dataset.id,{quantity:Number(data.get('quantity')),low_threshold:Number(data.get('low_threshold')),revision:Number(form.dataset.revision),reason:data.get('reason')});materialEdit=null;await refresh();notice('재료 수량과 조정 이력을 저장했습니다.');return;}
     if(form.id==='supply-create'){const lines=[...form.querySelectorAll('[name^="packs:"]')].filter(i=>Number(i.value)>0).map(i=>({ingredient_id:Number(i.name.split(':')[1]),packs:Number(i.value),revision:Number(i.dataset.revision)}));const result=await api('/api/admin/supply',{key:data.get('key'),note:data.get('note'),lines});supplyKey=crypto.randomUUID();supplyDetail=result;render();notice('본사에 발주를 요청했습니다. 재고는 입고 확인 후 반영됩니다.');return;}
     if(form.id==='supply-transition'){supplyDetail=await api(supplyBase()+'/'+form.dataset.id,{action:event.submitter?.value,revision:Number(form.dataset.revision),note:data.get('note')});render();notice('발주 상태를 변경했습니다.');return;}
     if(form.id==='supply-receive'){const lines=[...form.querySelectorAll('[name^="receive:"]')].filter(i=>Number(i.value)>0).map(i=>({line_id:i.name.slice(8),quantity:Number(i.value)}));supplyDetail=await api('/api/admin/supply/'+form.dataset.id+'/receive',{key:data.get('key'),revision:Number(form.dataset.revision),note:data.get('note'),lines});receiptKey=crypto.randomUUID();render();notice('받은 수량을 재료 재고에 반영했습니다.');return;}
     if(form.id==='email-login'){
-      rememberAccount(await signInEmail(data.get('email'),data.get('password')));identity=null;current='orders';await refresh();poll();return;
+      rememberAccount(await signInEmail(data.get('email'),data.get('password')));identity=null;freshLogin=true;current='orders';await refresh();poll();return;
     }
     if(form.id==='email-signup'){
       await registerEmail(data.get('email'),data.get('password'));form.reset();app.innerHTML=accountLoginView('login',authSettings.legacy_enabled);notice('인증메일을 보냈습니다. 이메일의 링크를 확인한 뒤 로그인해 주세요.');return;
@@ -268,11 +290,11 @@ document.addEventListener("submit",event=>{
     }
     if(form.id==='claim-account'){
       const account=await signInEmail(data.get('email'),data.get('password'));
-      await api('/api/admin/claim-account',{id_token:account.idToken});rememberAccount(account);authSettings.legacy_enabled=false;identity=null;landingChosen=false;current='orders';await refresh();poll();notice('기존 매장을 이메일 계정에 연결했습니다. 다음부터 이메일로 로그인해 주세요.');return;
+      await api('/api/admin/claim-account',{id_token:account.idToken});rememberAccount(account);authSettings.legacy_enabled=false;identity=null;freshLogin=true;current='orders';await refresh();poll();notice('기존 매장을 이메일 계정에 연결했습니다. 다음부터 이메일로 로그인해 주세요.');return;
     }
     if(form.id==='invite-account'){await api('/api/admin/accounts/invite',{email:data.get('email'),role:data.get('role')});await refresh();notice('초대를 등록했습니다. 구성원에게 관리자 화면 주소와 가입할 이메일을 알려 주세요.');return;}
     if(form.hasAttribute('data-member')){await api('/api/admin/accounts/member',{uid:form.dataset.member,revision:Number(form.dataset.revision),role:data.get('role'),enabled:data.has('enabled')});identity=null;await refresh();notice('권한을 변경했습니다. 다음 요청부터 적용됩니다.');return;}
-    if(form.id==='create-store'){const result=await api('/api/account/stores',{key:data.get('key'),name:data.get('name'),owner_email:data.get('owner_email'),source_store_id:Number(data.get('source_store_id')),address:data.get('address')??'',address_detail:data.get('address_detail')??'',locality:data.get('locality')??'',address_pending:data.has('address_pending')});selectStore(result.store.id,'accounts');return;}
+    if(form.id==='create-store'){const result=await api('/api/account/stores',{key:data.get('key'),name:data.get('name'),owner_email:data.get('owner_email'),source_store_id:Number(data.get('source_store_id')),address:data.get('address')??'',address_detail:data.get('address_detail')??'',locality:data.get('locality')??'',address_pending:data.has('address_pending')});selectStore(result.store.id,'accounts','hq');return;}
     if(form.id==='store-profile'){await api('/api/admin/store-profile',{address:data.get('address'),address_detail:data.get('address_detail'),locality:data.get('locality'),auto_name:data.has('auto_name'),name:data.get('name')??'',revision:Number(form.dataset.revision)});identity=null;await refresh();notice('매장 주소와 점포명을 저장했습니다.');return;}
     if(form.id==='hq-sales-period'){hqPeriod={from:data.get('from'),to:data.get('to'),store:data.get('store')};await refresh();return;}
     if(form.id==='promotion-editor'){const p=promotionData(form,promotionEdit.id),items=promotions.items.map(x=>x.id===p.id?p:x);if(promotionEdit.isNew)items.push(p);await savePromotionCatalog(items);notice('할인 예약을 저장했습니다. 설정한 시간에 자동으로 적용됩니다.');return;}
@@ -320,6 +342,12 @@ document.addEventListener("submit",event=>{
 document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(b&&!busy){
+    if(b.hasAttribute('data-workspace-hq')){if(allowWorkspaceNavigation())act(async()=>{closeEditor();workspace='hq';current='hqhome';await refresh();});return;}
+    if(b.hasAttribute('data-workspace-store')){
+      const stores=directStores(identity);if(!stores.length||!allowWorkspaceNavigation())return;
+      if(stores.length===1)selectStore(stores[0].id,'orders','store');
+      else act(async()=>{closeEditor();workspace='hq';current='hqhome';await refresh();app.querySelector('#open-direct-store select')?.focus();});return;
+    }
     if(b.hasAttribute('data-ingredient-new')){ingredientEdit={key:crypto.randomUUID(),active:1};supplyDetail=null;render();return;}
     if(b.dataset.ingredientEdit){ingredientEdit=structuredClone(supplyData.items.find(i=>i.id===Number(b.dataset.ingredientEdit)));render();return;}
     if(b.hasAttribute('data-ingredient-back')){ingredientEdit=null;render();return;}
@@ -329,9 +357,9 @@ document.addEventListener("click",event=>{
     if(b.hasAttribute('data-supply-back')||b.hasAttribute('data-supply-refresh')){act(async()=>{supplyDetail=null;await refresh();});return;}
     if(b.hasAttribute('data-supply-page')){act(async()=>{supplyFilter.page=Number(b.dataset.supplyPage);await refresh();});return;}
     if(b.dataset.copyInvite){act(async()=>{const url=new URL('admin.html',location.href);url.searchParams.set('store',b.dataset.inviteStore);const message=`매장 관리자 가입 안내\n${url.href}\n등록된 이메일: ${b.dataset.copyInvite}\n초대받은 계정 가입 → 이메일 인증 → 로그인 순서로 진행해 주세요. 이미 계정이 있다면 로그인하면 됩니다. 초대는 등록 후 7일간 유효합니다.`;await navigator.clipboard.writeText(message);notice('가입 안내를 복사했습니다. 점주에게 전달해 주세요.');});return;}
-    if(b.dataset.openStore){selectStore(Number(b.dataset.openStore),'orders');return;}
-    if(b.dataset.storeAccounts){selectStore(Number(b.dataset.storeAccounts),'accounts');return;}
-    if(b.dataset.storeProfile){selectStore(Number(b.dataset.storeProfile),'storeinfo');return;}
+    if(b.dataset.openStore){selectStore(Number(b.dataset.openStore),'orders','store');return;}
+    if(b.dataset.storeAccounts){selectStore(Number(b.dataset.storeAccounts),'accounts','hq');return;}
+    if(b.dataset.storeProfile){selectStore(Number(b.dataset.storeProfile),'storeinfo','hq');return;}
     if(b.dataset.hqDays){act(async()=>{hqPeriod={...periodPreset(Number(b.dataset.hqDays)),store:hqPeriod.store};await refresh();});return;}
     if(b.dataset.accountMode){app.innerHTML=accountLoginView(b.dataset.accountMode,authSettings.legacy_enabled);notice();return;}
     if(b.hasAttribute('data-legacy-login')){clearAccount();login(false,true);return;}
@@ -436,7 +464,7 @@ document.addEventListener("change",event=>{
   if(event.target.id==='account-store'){
     if(busy){event.target.value=String(getStoreId());return;}
     if((editor||adEdit||promotionEdit||inventoryEdit||orderDirty()||categoriesDirty())&&!confirm('작성 중인 내용을 버리고 매장을 바꿀까요?')){event.target.value=String(getStoreId());return;}
-    selectStore(Number(event.target.value));return;
+    if(allowWorkspaceNavigation())selectStore(Number(event.target.value),current,'store');else event.target.value=String(getStoreId());return;
   }
   const adForm=event.target.closest('#ad-editor');if(adForm){adDirty=true;if(event.target.name==='ad-photo'){adForm.elements['ad-x'].value=50;adForm.elements['ad-y'].value=50;adForm.querySelector('.ad-crop').hidden=false;void refreshAdPreview(adForm);}return;}
   const form=event.target.closest("#menu-editor");if(!form||!editor)return;

@@ -1,8 +1,8 @@
-import {escapeText as esc} from './common.js?v=20261128-v111';
-import {addressFields} from './store-profile-ui.js?v=20261128-v111';
+import {escapeText as esc} from './common.js?v=20261128-v112';
+import {addressFields} from './store-profile-ui.js?v=20261128-v112';
 export function franchiseView(data){
  const stores=data.stores,templates=stores.filter(s=>s.menu_count>0);
- return `<section class="franchise-dashboard"><div class="heading"><h1>본사 관리</h1><p class="muted">같은 기본 구성으로 가맹점을 개설하고, 매장별 운영을 관리합니다.</p></div>
+ return `<section class="franchise-dashboard"><div class="heading"><h1>가맹점 관리</h1><p class="muted">같은 기본 구성으로 가맹점을 개설하고, 매장별 운영을 관리합니다.</p></div>
  <div class="franchise-layout"><section class="panel franchise-opening"><h2>가맹점 개설 · 점주 초대</h2>
  <p>메뉴·사진·옵션·분류·메뉴 순서·광고를 새 매장에 복사합니다. 점주는 자기 매장의 모든 운영 기능을 사용할 수 있습니다.</p>
  <form id="create-store"><input type="hidden" name="key" value="${crypto.randomUUID()}">
