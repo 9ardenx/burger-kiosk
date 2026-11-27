@@ -1,4 +1,4 @@
-import {accountToken,clearAccount} from './account-client.js?v=20261128-v112';
+import {accountToken,clearAccount} from './account-client.js?v=20261128-v113';
 const API_ORIGIN = "https://burger-kiosk-9ardenx-api.epicowl12.chatgpt.site";
 const keyPrefix = "burger-kiosk.cloud.v1.";
 export function getStoreId(){const value=new URL(location.href).searchParams.get('store')??'1';return /^[1-9]\d{0,8}$/.test(value)?Number(value):1;}
@@ -14,11 +14,12 @@ function customerKey() {
   if(!key){key=crypto.randomUUID()+crypto.randomUUID();sessionStorage.setItem(keyPrefix+"customer"+(getStoreId()===1?"":"."+getStoreId()),key);}
   return key;
 }
-async function api(path,body) {
+export function beginLogout(){const legacy=sessionStorage.getItem(keyPrefix+'staff');const account=clearAccount();sessionStorage.removeItem(keyPrefix+'staff');return account??legacy??'';}
+async function api(path,body,tokenSnapshot) {
   const headers={"X-Kiosk-Session":customerKey(),"X-Kiosk-Store":String(getStoreId())};
   const token=sessionStorage.getItem(keyPrefix+"staff");
   const protectedPath=path.startsWith('/api/admin/')||path.startsWith('/api/account');
-  const account=protectedPath&&!['/api/admin/login','/api/admin/claim-account'].includes(path)?await accountToken():null;
+  const account=tokenSnapshot!==undefined?tokenSnapshot:protectedPath&&!['/api/admin/login','/api/admin/claim-account'].includes(path)?await accountToken():null;
   if(protectedPath&&(account||token))headers.Authorization='Bearer '+(account||token);
   if(body!==undefined)headers["Content-Type"]="application/json";
   let response, data;
@@ -32,11 +33,11 @@ async function api(path,body) {
     throw new Error("매장 서버에 연결할 수 없습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.");
   }
   if(!response.ok){
-    if(response.status===401&&protectedPath){sessionStorage.removeItem(keyPrefix+'staff');clearAccount();}
+    if(response.status===401&&protectedPath&&tokenSnapshot===undefined){sessionStorage.removeItem(keyPrefix+'staff');clearAccount();}
     throw Object.assign(new Error(data.error||"요청을 처리하지 못했습니다."),{status:response.status,code:data.code});
   }
   if(path==='/api/admin/login'&&data.token){clearAccount();sessionStorage.setItem(keyPrefix+'staff',data.token);}
-  if(path==='/api/admin/logout'){clearAccount();sessionStorage.removeItem(keyPrefix+'staff');}
+  if(path==='/api/admin/logout'&&tokenSnapshot===undefined){clearAccount();sessionStorage.removeItem(keyPrefix+'staff');}
   return data;
 }
 export { api };

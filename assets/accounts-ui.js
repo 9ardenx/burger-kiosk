@@ -1,4 +1,4 @@
-import {escapeText} from './common.js?v=20261128-v112';
+import {escapeText} from './common.js?v=20261128-v113';
 const address='<label>이메일<input name="email" type="email" autocomplete="username" required maxlength="254"></label>';
 const password='<label>비밀번호<input name="password" type="password" autocomplete="current-password" required></label>';
 export function accountLoginView(mode='login',legacy=true){
