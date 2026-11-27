@@ -1,9 +1,9 @@
-// Real UI/API on an isolated shop; virtual browser clock exercises minute boundaries.
+// Real UI/API on an isolated shop; virtual browser clock exercises 10-second boundaries.
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),os=require('node:os'),path=require('node:path'),net=require('node:net');
 const {spawn}=require('node:child_process'),{randomUUID}=require('node:crypto');
 async function main(){
- const root=path.resolve(__dirname,'..'),out=path.join(root,'data/qa/v1.7-ads');fs.mkdirSync(out,{recursive:true});
+ const root=path.resolve(__dirname,'..'),out=path.join(root,'data/qa/v1.7.1');fs.mkdirSync(out,{recursive:true});
  const probe=net.createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'burger-ad-slides-')),password=randomUUID(),base=`http://127.0.0.1:${port}`;
  const server=spawn('python',['app.py','--port',String(port),'--data-dir',directory],{cwd:root,windowsHide:true,stdio:'ignore',env:{...process.env,PAYMENT_MODE:'demo',KIOSK_ADMIN_PASSWORD:password}});
@@ -22,11 +22,11 @@ async function main(){
   await customer.clock.install();await customer.clock.pauseAt(new Date(Date.now()+1000));await customer.goto(base);
   const title=()=>customer.locator('.ad-slide:not([aria-hidden="true"]) h1').textContent();
   await customer.getByRole('heading',{name:'신메뉴 소식',exact:true}).waitFor();assert.equal(await customer.locator('#ad-position').textContent(),'1 / 3');
-  await customer.clock.runFor(59000);assert.equal(await title(),'신메뉴 소식');await customer.clock.runFor(1000);assert.equal(await title(),'치킨버거');assert.match(await customer.locator('.ad-slide:not([aria-hidden="true"]) .welcome-copy p').textContent(),/크리스피/);
-  pass('V17-ADS-01 first news remains for 59 seconds, advances at 60 to latest menu with matching description');
+  await customer.clock.runFor(9000);assert.equal(await title(),'신메뉴 소식');await customer.clock.runFor(1000);assert.equal(await title(),'치킨버거');assert.match(await customer.locator('.ad-slide:not([aria-hidden="true"]) .welcome-copy p').textContent(),/크리스피/);
+  pass('V17-ADS-01 first news remains for 9 seconds, advances at 10 to latest menu with matching description');
   await customer.locator('[data-action=ad-prev]').click();assert.equal(await title(),'신메뉴 소식');await customer.locator('[data-action=ad-prev]').click();assert.equal(await title(),'클래식버거');await customer.locator('[data-action=ad-next]').click();assert.equal(await title(),'신메뉴 소식');
-  await customer.clock.runFor(59000);assert.equal(await title(),'신메뉴 소식');await customer.clock.runFor(1000);assert.equal(await title(),'치킨버거');
-  await customer.locator('[data-action=ad-pause]').click();await customer.clock.runFor(120000);assert.equal(await title(),'치킨버거');await customer.locator('[data-action=ad-pause]').click();await customer.clock.runFor(60000);assert.equal(await title(),'클래식버거');
+  await customer.clock.runFor(9000);assert.equal(await title(),'신메뉴 소식');await customer.clock.runFor(1000);assert.equal(await title(),'치킨버거');
+  await customer.locator('[data-action=ad-pause]').click();await customer.clock.runFor(120000);assert.equal(await title(),'치킨버거');await customer.locator('[data-action=ad-pause]').click();await customer.clock.runFor(10000);assert.equal(await title(),'클래식버거');
   pass('V17-ADS-02 previous/next wrap, rapid navigation, manual timer reset, pause and resume');
   await admin.locator('[data-tab=ads]').click();await admin.locator('[data-new-ad]').click();await admin.locator('[name=ad-title]').fill('우선 행사');await admin.locator('[name=ad-description]').fill('관리자가 우선 지정한 설명');await admin.locator('[name=ad-placement]').selectOption('PRIORITY');await admin.locator('[name=ad-photo]').setInputFiles(path.join(root,'assets/menu/published/shrimp-burger.jpg'));await admin.getByText('1440 × 810px · 미리보기와 같은 사진이 저장됩니다.',{exact:true}).waitFor();await admin.locator('#ad-editor [type=submit]').click();await admin.locator('.ad-card').getByRole('heading',{name:'우선 행사'}).waitFor();
   await customer.reload();await customer.getByRole('heading',{name:'신메뉴 소식',exact:true}).waitFor();await customer.locator('[data-action=ad-next]').click();assert.equal(await title(),'우선 행사');await customer.locator('[data-action=ad-next]').click();assert.equal(await title(),'치킨버거');

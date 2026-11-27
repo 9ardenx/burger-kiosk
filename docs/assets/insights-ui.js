@@ -1,5 +1,5 @@
-import {escapeText as esc,money} from './common.js?v=20261127-v17-ads';
-import {diningName} from './welcome.js?v=20261127-v17-ads';
+import {escapeText as esc,money} from './common.js?v=20261127-v171';
+import {diningName} from './welcome.js?v=20261127-v171';
 
 export function periodPreset(days=7) {
   const now=Date.now()+9*3600000,to=new Date(now).toISOString().slice(0,10);

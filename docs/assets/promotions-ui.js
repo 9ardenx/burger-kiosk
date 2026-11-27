@@ -1,4 +1,4 @@
-import {escapeText as esc,money} from './common.js?v=20261127-v17-ads';
+import {escapeText as esc,money} from './common.js?v=20261127-v171';
 const days=['일','월','화','수','목','금','토'];
 export function promotionView(state,menus,edit){
  if(edit)return promotionEditor(edit,menus);

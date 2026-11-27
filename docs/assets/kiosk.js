@@ -1,9 +1,9 @@
-import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261127-v17-ads';
-import {evaluateGroups} from "./choice-rules.js?v=20261127-v17-ads";
-import {labels, menuPicture, setCategories} from "./catalog.js?v=20261127-v17-ads";
-import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261127-v17-ads";
-import {welcomeView,heroView,diningName} from './welcome.js?v=20261127-v17-ads';
-import {buildAdSlides} from './ad-slides.js?v=20261127-v17-ads';
+import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261127-v171';
+import {evaluateGroups} from "./choice-rules.js?v=20261127-v171";
+import {labels, menuPicture, setCategories} from "./catalog.js?v=20261127-v171";
+import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261127-v171";
+import {welcomeView,heroView,diningName} from './welcome.js?v=20261127-v171';
+import {buildAdSlides} from './ad-slides.js?v=20261127-v171';
 
 const storageKey = "burger-kiosk-session-v1";
 const defaults = () => ({cart: [], page: "welcome", diningType:null, checkoutKey: null, orderId: null, attemptKey: null, callback: null});
@@ -13,7 +13,7 @@ catch { state = defaults(); }
 let menu = [], mode = "demo", clientKey = "", order = null, busy = false;
 const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
 let ads=[],adCatalog=[],adIndex=0,adPaused=reducedMotion.matches,adElapsed=0,adLastTick=performance.now(),adAnimation=null;
-const AD_INTERVAL=60000;
+const AD_INTERVAL=10000;
 function resetAdClock(){adElapsed=0;adLastTick=performance.now();}
 const validDining=()=>['DINE_IN','TAKEOUT'].includes(state.diningType);
 function updateAdSlides(preserve=true){
@@ -300,7 +300,7 @@ document.addEventListener("click",event=>{
   const control=event.target.closest("[data-action]");
   if(!control || control.disabled)return;
   const action=control.dataset.action;
-  if(action.startsWith('ad-')){if(busy||!ads.length)return;if(action==='ad-pause'){adPaused=!adPaused;resetAdClock();control.textContent=adPaused?'자동 재생':'일시 정지';control.setAttribute('aria-pressed',String(adPaused));}else moveAd(action==='ad-next'?1:-1);return;}
+  if(action.startsWith('ad-')){if(busy||!ads.length)return;if(action==='ad-pause'){adPaused=!adPaused;resetAdClock();control.setAttribute('aria-label',adPaused?'광고 자동 재생':'광고 일시 정지');control.setAttribute('aria-pressed',String(adPaused));}else moveAd(action==='ad-next'?1:-1);return;}
   if(action==="close") {dialog.close();return;}
   if(["clear-cart","cancel-order"].includes(action)){
     if(busy||!confirm(action==="clear-cart"?"장바구니의 메뉴를 모두 비울까요?":"현재 주문을 모두 취소하고 처음부터 시작할까요?"))return;
@@ -396,4 +396,4 @@ setInterval(()=>{
  if(adElapsed>=AD_INTERVAL)moveAd(1);
 },250);
 document.addEventListener('visibilitychange',resetAdClock);
-reducedMotion.addEventListener('change',event=>{if(event.matches){adPaused=true;resetAdClock();const b=document.querySelector('[data-action=ad-pause]');if(b){b.textContent='자동 재생';b.setAttribute('aria-pressed','true');}if(adAnimation)paintAd();}});
+reducedMotion.addEventListener('change',event=>{if(event.matches){adPaused=true;resetAdClock();const b=document.querySelector('[data-action=ad-pause]');if(b){b.setAttribute('aria-label','광고 자동 재생');b.setAttribute('aria-pressed','true');}if(adAnimation)paintAd();}});

@@ -1,8 +1,8 @@
-import {groupHtml, groupEditor, readGroupEditor} from "./group-editor.js?v=20261127-v17-ads";
-import {validateGroups} from "./choice-rules.js?v=20261127-v17-ads";
-import {escapeText} from "./common.js?v=20261127-v17-ads";
-import {labels,menuPicture} from "./catalog.js?v=20261127-v17-ads";
-import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261127-v17-ads";
+import {groupHtml, groupEditor, readGroupEditor} from "./group-editor.js?v=20261127-v171";
+import {validateGroups} from "./choice-rules.js?v=20261127-v171";
+import {escapeText} from "./common.js?v=20261127-v171";
+import {labels,menuPicture} from "./catalog.js?v=20261127-v171";
+import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261127-v171";
 function categoryOptions(selected) {
   return Object.entries(labels).map(([id,label])=>`<option value="${escapeText(id)}" ${selected===id?"selected":""}>${escapeText(label)}</option>`).join("");
 }

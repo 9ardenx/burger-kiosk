@@ -1,13 +1,13 @@
-import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261127-v17-ads';
-import {handleVariantButton} from "./group-editor.js?v=20261127-v17-ads";
-import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261127-v17-ads";
-import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261127-v17-ads";
-import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261127-v17-ads";
-import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261127-v17-ads';
-import {adList,adEditor} from './advertising-ui.js?v=20261127-v17-ads';
-import {diningName} from './welcome.js?v=20261127-v17-ads';
-import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261127-v17-ads';
-import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261127-v17-ads";
+import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261127-v171';
+import {handleVariantButton} from "./group-editor.js?v=20261127-v171";
+import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261127-v171";
+import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261127-v171";
+import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261127-v171";
+import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261127-v171';
+import {adList,adEditor} from './advertising-ui.js?v=20261127-v171';
+import {diningName} from './welcome.js?v=20261127-v171';
+import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261127-v171';
+import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261127-v171";
 
 const tabs=document.querySelector("#tabs");
 const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료",CANCELLED:"직권취소"};
