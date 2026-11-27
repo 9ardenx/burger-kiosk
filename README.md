@@ -30,7 +30,7 @@ Firebase Authentication에서 이메일/비밀번호를 켜고, 설정의 승인
 
 클라우드 서버는 Firebase REST의 토큰 조회를 통해 서명 검증된 사용자, 메일 인증, 만료·계정 정지·토큰 폐기 여부를 확인합니다. 브라우저는 비밀번호를 저장하지 않으며 세션 저장소의 로그인 토큰을 사용합니다. 브라우저의 매장 번호만으로 권한을 주지 않습니다.
 
-Python 로컬 실행은 기존 **단일 매장 호환 모드**입니다. v1.8 다중 매장과 Firebase 연결은 공개 클라우드/API 구현에 해당합니다. 실제 메일 수신과 최초 점주 연결은 사용자가 자기 계정으로 완료해야 하며, 자동 검사의 Firebase 응답은 임시 제공자로 대체합니다. 운영 PG·환불·푸시는 이번 버전에 포함하지 않습니다. [검증 결과](tests/v1.8-validation.md)
+Python 로컬 실행은 기존 **단일 매장 호환 모드**입니다. v1.8 다중 매장과 Firebase 연결은 공개 클라우드/API 구현에 해당합니다. 최초 점주 연결은 2026-11-27 사용자 완료 회신과 서버의 공용 로그인 종료로 확인했습니다. 실제 비밀번호 복구는 미실행이며, 자동 검사의 Firebase 응답은 임시 제공자로 대체합니다. 운영 PG·환불·푸시는 이번 버전에 포함하지 않습니다. [검증 결과](tests/v1.8-validation.md)
 
 공식 참고: [Firebase Auth REST](https://firebase.google.com/docs/reference/rest/auth), [계정 및 비밀번호 관리](https://firebase.google.com/docs/auth/web/manage-users).
 
