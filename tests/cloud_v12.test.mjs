@@ -6,6 +6,17 @@ import {createHash, randomUUID} from 'node:crypto';
 import {handleKiosk} from '../cloud/api.mjs';
 
 const campaign=(extra={})=>({id:randomUUID(),title:'시간 할인',enabled:true,menu_ids:[1],weekdays:[0,1,2,3,4,5,6],start_time:'00:00',end_time:'24:00',start_date:null,end_date:null,mode:'PERCENT',value:20,...extra});
+test('v1.7 ad placement preserves legacy cover, stores priority and rejects duplicate intro or invalid placement',async t=>{
+ const {call,sqlite}=await setup(t),photo=readFileSync(new URL('../assets/menu/published/classic-burger.jpg',import.meta.url)).toString('base64');
+ const intro={id:'v17-new-products-banner',title:'신메뉴 소식',description:'소개',enabled:true,photo},priority={...intro,id:randomUUID(),placement:'PRIORITY'};
+ const result=await call('/api/admin/ads',{items:[intro,priority],revision:0});assert.equal(result.status,200);assert.equal(result.data.items[0].placement,'INTRO');assert.equal(result.data.items[1].placement,'PRIORITY');
+ const legacy={...result.data.items[0]};delete legacy.placement;const encoded=JSON.stringify([legacy]);sqlite.prepare('UPDATE ad_catalog SET items=? WHERE id=1').run(encoded);
+ assert.equal((await call('/api/ads')).data.items[0].placement,'INTRO');assert.equal(sqlite.prepare('SELECT items FROM ad_catalog').get().items,encoded);
+ const edit=await call('/api/admin/ads',{items:[{...legacy,title:'제목 수정'}],revision:1});assert.equal(edit.data.items[0].placement,'INTRO');
+ for(const p of ['unknown',true])assert.equal((await call('/api/admin/ads',{items:[{...legacy,placement:p}],revision:2})).status,400);
+ assert.equal((await call('/api/admin/ads',{items:[legacy,{...priority,placement:'INTRO'}],revision:2})).status,400);
+ assert.equal((await call('/api/admin/ads')).data.revision,2);
+});
 function freezePricing(sqlite,when){sqlite.exec('DROP VIEW menu_pricing;DROP VIEW active_promotions;'+readFileSync(new URL('../cloud/promotion-pricing.sql',import.meta.url),'utf8').replace("datetime('now','+9 hours')",`datetime('${when}')`));}
 test('v1.7 KST windows include start, exclude end, and anchor overnight to the starting weekday and date',async t=>{
  const {call,sqlite}=await setup(t);

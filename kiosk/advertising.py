@@ -9,6 +9,7 @@ from .menu_admin import text_value
 def ad_state(db, public=False):
     row = db.execute('SELECT items,revision FROM ad_catalog WHERE id=1').fetchone()
     items = json.loads(row['items']) if row else []
+    items = [dict(a, placement=a.get('placement', 'INTRO' if a['id']=='v17-new-products-banner' else 'NORMAL')) for a in items]
     return {'items': [a for a in items if a['enabled']] if public else items, 'revision': row['revision'] if row else 0}
 
 def save_ads(db, data):
@@ -27,6 +28,8 @@ def save_ads(db, data):
         title = text_value(item.get('title'), 40, '광고 제목')
         description = text_value(item.get('description', ''), 120, '광고 설명', required=False)
         if type(item.get('enabled')) is not bool: raise Problem('광고 노출 상태를 확인해 주세요.')
+        placement=item.get('placement', previous.get(aid, {}).get('placement', 'INTRO' if aid=='v17-new-products-banner' else 'NORMAL'))
+        if placement not in ('INTRO','PRIORITY','NORMAL'): raise Problem('광고 노출 위치를 선택해 주세요.')
         key = previous.get(aid, {}).get('photo_key')
         if 'photo' in item:
             encoded = item['photo']
@@ -38,8 +41,9 @@ def save_ads(db, data):
             key = hashlib.sha256(raw).hexdigest()
             db.execute('INSERT OR IGNORE INTO ad_photo(key,content) VALUES(?,?)', (key, raw))
         if not key: raise Problem('광고 사진을 선택해 주세요.')
-        cleaned.append(dict(id=aid, title=title, description=description, photo_key=key, enabled=item['enabled']))
+        cleaned.append(dict(id=aid, title=title, description=description, photo_key=key, enabled=item['enabled'], placement=placement))
     if len({a['id'] for a in cleaned}) != len(cleaned): raise Problem('광고가 중복되었습니다.')
+    if sum(a['placement']=='INTRO' for a in cleaned)>1: raise Problem('첫 화면 소식은 하나만 지정할 수 있습니다. 기존 소식의 노출 위치를 먼저 변경해 주세요.')
     db.execute('INSERT OR IGNORE INTO ad_catalog(id) VALUES(1)')
     db.execute('UPDATE ad_catalog SET items=?,revision=revision+1 WHERE id=1', (json.dumps(cleaned, ensure_ascii=False),))
     return {'items': cleaned, 'revision': revision+1}
