@@ -1,11 +1,11 @@
-import {api,escapeText} from './common.js?v=20261128-v113';
-import {pushState} from './push-state.js?v=20261128-v113';
+import {api,escapeText} from './common.js?v=20261128-v114';
+import {pushState} from './push-state.js?v=20261128-v114';
 let context=null,epoch=0,interval,config=null,binding=null,registering=null,pushBusy=false,pollBusy=false,connection='화면 알림 연결 중…',device='이 기기 알림 꺼짐',audio=null,newOrders=[],onChange=()=>{},onUnauthorized=()=>{};
 const supported=()=>isSecureContext&&'serviceWorker'in navigator&&'PushManager'in window&&'Notification'in window;
 const channelKey=c=>'burger-kiosk.notice.v113:'+c.uid+':'+c.store;
 const bindingLock=task=>navigator.locks?navigator.locks.request('burger-kiosk.push-binding',task):task();
 function storedCursor(){const value=localStorage.getItem(channelKey(context));return value!==null&&/^\d+$/.test(value)?Number(value):null;}
-async function registration(){if(!supported())throw new Error('이 브라우저는 휴대폰 알림을 지원하지 않습니다. 아이폰은 홈 화면에 추가한 앱에서 열어 주세요.');if(!registering)registering=navigator.serviceWorker.register('./order-push-sw.js?v=20261128-v113',{scope:'./',type:'module',updateViaCache:'none'}).then(()=>navigator.serviceWorker.ready).catch(e=>{registering=null;throw e;});return registering;}
+async function registration(){if(!supported())throw new Error('이 브라우저는 휴대폰 알림을 지원하지 않습니다. 아이폰은 홈 화면에 추가한 앱에서 열어 주세요.');if(!registering)registering=navigator.serviceWorker.register('./order-push-sw.js?v=20261128-v114',{scope:'./',type:'module',updateViaCache:'none'}).then(()=>navigator.serviceWorker.ready).catch(e=>{registering=null;throw e;});return registering;}
 function paint(){
  for(const node of document.querySelectorAll('[data-notification-connection]'))node.textContent=connection;
  for(const node of document.querySelectorAll('[data-notification-device]'))node.textContent=device;
