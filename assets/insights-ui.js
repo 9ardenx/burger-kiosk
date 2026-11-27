@@ -1,5 +1,5 @@
-import {escapeText as esc,money} from './common.js?v=20261128-v19';
-import {diningName} from './welcome.js?v=20261128-v19';
+import {escapeText as esc,money} from './common.js?v=20261128-v110';
+import {diningName} from './welcome.js?v=20261128-v110';
 
 export function periodPreset(days=7) {
   const now=Date.now()+9*3600000,to=new Date(now).toISOString().slice(0,10);
@@ -9,7 +9,7 @@ const count=n=>Number(n).toLocaleString('ko-KR');
 const stamp=value=>new Date(value.replace(' ','T')+'Z').toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
 const stat=(label,value,note,accent=false)=>`<article class="panel metric ${accent?'metric-main':''}"><span>${label}</span><strong>${value}</strong><small>${note}</small></article>`;
 
-function chart(days) {
+export function chart(days) {
   if(days.length===1)return `<div class="single-day-chart"><span>${esc(days[0].date)} 순매출</span><strong>${money(days[0].net)}</strong><div class="single-day-bar" aria-hidden="true"></div></div>`;
   const width=760,height=180,pad=16,values=days.map(d=>d.net),max=Math.max(1,...values),min=Math.min(0,...values);
   const y=n=>pad+(height-pad*2)*(max-n)/(max-min);

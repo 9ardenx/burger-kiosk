@@ -4,7 +4,7 @@ export const escapeText = value => String(value).replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 })[char]);
 
-export { api } from "./backend.js?v=20261128-v19";
+export { api } from "./backend.js?v=20261128-v110";
 
 export function notice(message = "") {
   const element = document.querySelector("#notice");
