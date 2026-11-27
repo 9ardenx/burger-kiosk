@@ -41,7 +41,7 @@
 
 기존 Firebase 로그인·D1 DB·사진 저장소는 유지합니다. 푸시는 VAPID 기반 표준 Web Push(`@block65/webcrypto-web-push`2.0.0)를 사용하며 FCM HTTP v1/Firestore/Cloud Functions로 이전하지 않습니다. `WEB_PUSH_PUBLIC_KEY`와 `WEB_PUSH_PRIVATE_KEY`는 Sites 런타임 설정에 보관하고 비밀키·기기 구독 주소/암호화 정보는 Git에 넣지 않습니다. 서비스 워커에는 API/화면 캐시 기능이 없습니다. 개발용 Node 검사 전에는 `cloud/`에서 `pnpm install --frozen-lockfile`로 의존성을 설치합니다.
 
-향후 시연 준비: 점주가 처음 한 번 로그인하여 매장을 선택하고 기기를 고객용 키오스크로 고정하는 설치 화면, 실제 출금 없는 토스 테스트 결제 연동. 현재 고객 주소의 `store` 값을 직접 입력하지 않는 설치 UI는 아직 구현하지 않았습니다. [v1.13 검사 기록](tests/v1.13-validation.md).
+이후 v1.14에서 점주 최초 로그인·매장 연결 화면을, v1.15에서 토스 테스트 결제 연동을 추가했습니다. 사용 방법은 위의 해당 버전을 참고합니다. [v1.13 검사 기록](tests/v1.13-validation.md).
 
 ## v1.12 — 본사·점주 화면 분리
 
