@@ -10,7 +10,7 @@ async function main(){
  }catch{res.writeHead(404).end();}});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+server.address().port;const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
  try{const p=await browser.newPage();p.on('pageerror',e=>errors.push(e.message));await p.goto(base+'/?old');await p.getByRole('heading',{name:'첫 소식',exact:true}).waitFor();assert.equal(await p.locator('.ad-navigation').isHidden(),true);
- phase='new';await p.goto(base+'/?new');await p.locator('#ad-position').getByText('1 / 3',{exact:true}).waitFor({state:'attached'});await p.locator('[data-action=ad-next]').click();await p.getByRole('heading',{name:'최근 등록 메뉴',exact:true}).waitFor();assert.ok(requests.some(r=>r.phase==='new'&&r.url.includes('ad-slides.js?v=20261127-v171')));assert.deepEqual(errors,[]);
+ phase='new';await p.goto(base+'/?new');await p.locator('#ad-position').getByText('1 / 3',{exact:true}).waitFor({state:'attached'});await p.locator('[data-action=ad-next]').click();await p.getByRole('heading',{name:'최근 등록 메뉴',exact:true}).waitFor();assert.ok(requests.some(r=>r.phase==='new'&&r.url.includes('ad-slides.js?v=20261127-v172')));assert.deepEqual(errors,[]);
  fs.mkdirSync(path.join(root,'data/qa/v1.7-ads'),{recursive:true});fs.writeFileSync(path.join(root,'data/qa/v1.7-ads/cache-results.json'),JSON.stringify({date:new Date().toISOString(),sameBrowser:true,oldOnlyOneAd:true,newAutomaticMenus:true,requests,errors},null,2));console.log('PASS V17-ADS-CACHE same browser keeps v1.7 cache and fetches versioned new carousel modules');
  }finally{await browser.close();await new Promise(r=>server.close(r));}
 }
