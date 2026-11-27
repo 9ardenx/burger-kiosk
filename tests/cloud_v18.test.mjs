@@ -83,11 +83,11 @@ test('v1.8 first owner claim needs both legacy authority and designated verified
  assert.equal((await f.callTenant(token,1,'/api/admin/orders')).status,200);
  assert.equal((await f.call(claim,{id_token:token},undefined,true,1,old)).status,409);
 });
-test('v1.8 HQ creates empty stores, ordinary owners cannot; DB rejects cross-store order items',async t=>{
+test('HQ creates stores from a template in v1.9; DB rejects cross-store order items',async t=>{
  const f=await tenantFixture(t),call=f.callTenant;
  assert.equal((await call(f.a,1,'/api/account/stores',{name:'금지'})).status,403);
- const store=(await call(f.hq,1,'/api/account/stores',{name:'임시 새 매장'})).data.store;
- assert.equal((await call(f.hq,store.id,'/api/menu')).data.menu.length,0);
+ const store=(await call(f.hq,1,'/api/account/stores',{name:'임시 새 매장',key:randomUUID(),source_store_id:1,owner_email:'new-owner@example.test'})).data.store;
+ assert.equal((await call(f.hq,store.id,'/api/menu')).data.menu.length,f.menu.length);
  const order=await paidOrder(f,f.a,1,1,5500);
  assert.throws(()=>f.sqlite.prepare('INSERT INTO order_item(id,order_id,menu_id,name,quantity,price) VALUES(?,?,?,?,1,1)').run(randomUUID(),order.id,f.bMenu,'혼합 거절'),/STORE_MISMATCH/);
  assert.throws(()=>f.sqlite.prepare('UPDATE menu SET store_id=2 WHERE id=1').run(),/STORE_MISMATCH/);

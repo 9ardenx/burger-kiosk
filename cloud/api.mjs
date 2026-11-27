@@ -1,3 +1,4 @@
+import {franchiseStores} from './franchise.mjs';
 import {accountConfig,legacyEnabled,principal,accountInfo,authorizeStore,claimAccount,listMembers,inviteMember,changeMember,revokeInvitation,createStore} from './accounts.mjs';
 import {storeId,storeDb,resolveStore} from './store-context.mjs';
 import {validateGroups, evaluateGroups} from "../docs/assets/choice-rules.js";
@@ -357,7 +358,7 @@ async function dispatch(request,env,path) {
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
   if(path==='/api/auth/config'&&!body)return accountConfig(db,env);
   if(path==='/api/account'&&!body)return accountInfo(db,await principal(db,env,request));
-  if(path==='/api/account/stores'&&body)return createStore(db,await principal(db,env,request),body);
+  if(path==='/api/account/stores'){const actor=await principal(db,env,request);return body?createStore(db,actor,body):franchiseStores(db,actor);}
   const store=await resolveStore(db,request);db=storeDb(db,store.id);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
   if(path==='/api/ads'&&!body)return adState(db,true);

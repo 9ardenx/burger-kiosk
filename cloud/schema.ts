@@ -74,8 +74,9 @@ export const inventoryMovement = sqliteTable('inventory_movement', {
 },t=>[uniqueIndex('inventory_order_movement').on(t.order_id,t.menu_id,t.kind)]);
 
 export const stores = sqliteTable('store', {
- id:integer().primaryKey({autoIncrement:true}),name:text().notNull(),enabled:integer().notNull().default(1),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
-});
+ id:integer().primaryKey({autoIncrement:true}),name:text().notNull(),enabled:integer().notNull().default(1),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`),
+ opening_key:text(),opening_signature:text(),opening_tag:text(),template_store_id:integer()
+},t=>[uniqueIndex('store_opening_key_unique').on(t.opening_key)]);
 export const staffAccounts = sqliteTable('staff_account', {
  uid:text().primaryKey(),email:text().notNull(),platform_role:text().notNull().default('USER'),enabled:integer().notNull().default(1),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
 },t=>[check('account_role',sql`${t.platform_role} IN ('USER','HQ')`)]);

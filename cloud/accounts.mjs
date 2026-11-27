@@ -99,9 +99,4 @@ export async function revokeInvitation(db,actor,body){
  check(typeof body.id==='string','등록 정보를 확인해 주세요.');
  await stmt(db,'UPDATE store_invitation SET revoked=1 WHERE id=? AND store_id=? AND accepted_uid IS NULL',body.id,storeId(db)).run();return {ok:true};
 }
-export async function createStore(db,actor,body){
- check(!actor.legacy&&actor.platform_role==='HQ','본사 관리자만 매장을 등록할 수 있습니다.',403,'ROLE_FORBIDDEN');
- check(typeof body.name==='string'&&body.name.trim()&&body.name.trim().length<=50,'매장 이름을 1~50자로 입력해 주세요.');
- const result=await stmt(db,'INSERT INTO store(name) VALUES(?) RETURNING id,name',body.name.trim()).first();
- await stmt(db,"INSERT INTO account_audit(store_id,actor,action,target) VALUES(?,?,'STORE_CREATE',?)",result.id,actor.uid,String(result.id)).run();return {store:result};
-}
+export {openFranchise as createStore} from './franchise.mjs';

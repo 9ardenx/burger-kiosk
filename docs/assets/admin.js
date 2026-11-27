@@ -1,24 +1,27 @@
-import {configureAccountAuth,rememberAccount,clearAccount,signInEmail,registerEmail,sendVerification,sendPasswordReset} from './account-client.js?v=20261127-v181';
-import {accountLoginView,accountSettingsView,storeBar} from './accounts-ui.js?v=20261127-v181';
-import {getStoreId,selectStore} from './backend.js?v=20261127-v181';
-import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261127-v181';
-import {handleVariantButton} from "./group-editor.js?v=20261127-v181";
-import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261127-v181";
-import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261127-v181";
-import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261127-v181";
-import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261127-v181';
-import {adList,adEditor} from './advertising-ui.js?v=20261127-v181';
-import {diningName} from './welcome.js?v=20261127-v181';
-import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261127-v181';
-import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261127-v181";
+import {franchiseView} from './franchise-ui.js?v=20261128-v19';
+import {configureAccountAuth,rememberAccount,clearAccount,signInEmail,registerEmail,sendVerification,sendPasswordReset} from './account-client.js?v=20261128-v19';
+import {accountLoginView,accountSettingsView,storeBar} from './accounts-ui.js?v=20261128-v19';
+import {getStoreId,selectStore} from './backend.js?v=20261128-v19';
+import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261128-v19';
+import {handleVariantButton} from "./group-editor.js?v=20261128-v19";
+import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261128-v19";
+import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261128-v19";
+import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261128-v19";
+import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261128-v19';
+import {adList,adEditor} from './advertising-ui.js?v=20261128-v19';
+import {diningName} from './welcome.js?v=20261128-v19';
+import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261128-v19';
+import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261128-v19";
 
 const tabs=document.querySelector('#tabs');
-let authSettings={enabled:false,legacy_enabled:true},identity=null,memberRecords={members:[],invitations:[]};
+let authSettings={enabled:false,legacy_enabled:true},identity=null,memberRecords={members:[],invitations:[]},franchises={stores:[]};
+const initialTab=['orders','menu','accounts','franchise','inventory','promotions'].includes(location.hash.slice(1))?location.hash.slice(1):null;
+let landingChosen=Boolean(initialTab);
 const isStaff=()=>identity?.stores.find(s=>s.id===getStoreId())?.role==='STAFF';
 const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료",CANCELLED:"직권취소"};
 const cancelDialog=document.querySelector('#admin-cancel-dialog');
 const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 완료"};
-let current=['inventory','promotions'].includes(location.hash.slice(1))?location.hash.slice(1):'orders', orders=[], menu=[], busy=false, selected=null, filter="open", timer;
+let current=initialTab??'orders', orders=[], menu=[], busy=false, selected=null, filter="open", timer;
 let editor=null, previewUrl=null, previewSequence=0;
 let categoryDraft=[],categorySaved=[],categoryRevision=0,security=null;
 let advertising={items:[],revision:0},adEdit=null,adSequence=0,adDirty=false;
@@ -57,6 +60,7 @@ async function refreshPhotoPreview(form) {
 function closeEditor(){promotionEdit=null;resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;inventoryEdit=null;}
 function login(recovery=false,legacy=false) {
   identity=null;
+  landingChosen=false;
   cancelDialog.close();
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
   closeEditor();
@@ -123,9 +127,9 @@ function patchOrders() {
 }
 function render() {
   tabs.hidden=false;
-  tabs.innerHTML=Object.entries({orders:'주문 현황',sales:'매출 분석',inventory:'재고 관리',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',promotions:'할인 관리',security:'암호 관리',...(authSettings.enabled?{accounts:'계정 관리'}:{})}).filter(([id])=>!(id==='security'&&identity&&!identity.legacy)&&(!isStaff()||id==='orders')).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
-  app.innerHTML=current==='accounts'?accountSettingsView(identity,memberRecords):current==='promotions'?promotionView(promotions,menu,promotionEdit):current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
-  if(identity)app.insertAdjacentHTML('afterbegin',storeBar(identity,getStoreId()));
+  tabs.innerHTML=Object.entries({...(identity?.platform_role==='HQ'?{franchise:'본사 관리'}:{}),orders:'주문 현황',sales:'매출 분석',inventory:'재고 관리',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',promotions:'할인 관리',security:'암호 관리',...(authSettings.enabled?{accounts:'계정 관리'}:{})}).filter(([id])=>!(id==='security'&&identity&&!identity.legacy)&&(!isStaff()||id==='orders')).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
+  app.innerHTML=current==='franchise'?franchiseView(franchises):current==='accounts'?accountSettingsView(identity,memberRecords,getStoreId()):current==='promotions'?promotionView(promotions,menu,promotionEdit):current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
+  if(identity&&current!=='franchise')app.insertAdjacentHTML('afterbegin',storeBar(identity,getStoreId()));
   if(current==="orders")patchOrders();
   if(current==='promotions'&&promotionEdit)promotionPreview(app.querySelector('#promotion-editor'),menu);
   setRequestState(busy);
@@ -136,8 +140,10 @@ async function refresh() {
     catch(error){if(error.status===403){clearAccount();login();}throw error;}
     if(!identity.stores.length){login();throw new Error('연결된 매장이 없습니다. 점주에게 계정 등록을 요청해 주세요.');}
     if(!identity.stores.some(s=>s.id===getStoreId())){selectStore(identity.stores[0].id);return;}
-    if(isStaff()&&current!=='orders'||!identity.legacy&&current==='security')current='orders';
+    if(!landingChosen){current=identity.platform_role==='HQ'?'franchise':'orders';landingChosen=true;}
+    if(isStaff()&&current!=='orders'||!identity.legacy&&current==='security'||current==='franchise'&&identity.platform_role!=='HQ')current='orders';
   }
+  if(current==='franchise'){franchises=await api('/api/account/stores');render();return;}
   if(current==='accounts'){memberRecords=identity.legacy?{members:[],invitations:[]}:await api('/api/admin/accounts');render();return;}
   if(current==='promotions'){const [p,m]=await Promise.all([api('/api/admin/promotions'),api('/api/admin/menu')]);promotions=p;menu=m.menu;render();return;}
   if(current==='sales'){sales=await api('/api/admin/sales?'+new URLSearchParams(salesPeriod));render();return;}
@@ -241,11 +247,11 @@ document.addEventListener("submit",event=>{
     }
     if(form.id==='claim-account'){
       const account=await signInEmail(data.get('email'),data.get('password'));
-      await api('/api/admin/claim-account',{id_token:account.idToken});rememberAccount(account);authSettings.legacy_enabled=false;identity=null;current='orders';await refresh();poll();notice('기존 매장을 이메일 계정에 연결했습니다. 다음부터 이메일로 로그인해 주세요.');return;
+      await api('/api/admin/claim-account',{id_token:account.idToken});rememberAccount(account);authSettings.legacy_enabled=false;identity=null;landingChosen=false;current='orders';await refresh();poll();notice('기존 매장을 이메일 계정에 연결했습니다. 다음부터 이메일로 로그인해 주세요.');return;
     }
     if(form.id==='invite-account'){await api('/api/admin/accounts/invite',{email:data.get('email'),role:data.get('role')});await refresh();notice('초대를 등록했습니다. 구성원에게 관리자 화면 주소와 가입할 이메일을 알려 주세요.');return;}
     if(form.hasAttribute('data-member')){await api('/api/admin/accounts/member',{uid:form.dataset.member,revision:Number(form.dataset.revision),role:data.get('role'),enabled:data.has('enabled')});identity=null;await refresh();notice('권한을 변경했습니다. 다음 요청부터 적용됩니다.');return;}
-    if(form.id==='create-store'){const result=await api('/api/account/stores',{name:data.get('name')});selectStore(result.store.id);return;}
+    if(form.id==='create-store'){const result=await api('/api/account/stores',{key:data.get('key'),name:data.get('name'),owner_email:data.get('owner_email'),source_store_id:Number(data.get('source_store_id'))});selectStore(result.store.id,'accounts');return;}
     if(form.id==='promotion-editor'){const p=promotionData(form,promotionEdit.id),items=promotions.items.map(x=>x.id===p.id?p:x);if(promotionEdit.isNew)items.push(p);await savePromotionCatalog(items);notice('할인 예약을 저장했습니다. 설정한 시간에 자동으로 적용됩니다.');return;}
     if(form.id==='sales-period'){
       salesPeriod={from:data.get('from'),to:data.get('to')};await refresh();return;
@@ -291,6 +297,9 @@ document.addEventListener("submit",event=>{
 document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(b&&!busy){
+    if(b.dataset.copyInvite){act(async()=>{const url=new URL('admin.html',location.href);url.searchParams.set('store',b.dataset.inviteStore);const message=`매장 관리자 가입 안내\n${url.href}\n등록된 이메일: ${b.dataset.copyInvite}\n초대받은 계정 가입 → 이메일 인증 → 로그인 순서로 진행해 주세요. 이미 계정이 있다면 로그인하면 됩니다. 초대는 등록 후 7일간 유효합니다.`;await navigator.clipboard.writeText(message);notice('가입 안내를 복사했습니다. 점주에게 전달해 주세요.');});return;}
+    if(b.dataset.openStore){selectStore(Number(b.dataset.openStore),'orders');return;}
+    if(b.dataset.storeAccounts){selectStore(Number(b.dataset.storeAccounts),'accounts');return;}
     if(b.dataset.accountMode){app.innerHTML=accountLoginView(b.dataset.accountMode,authSettings.legacy_enabled);notice();return;}
     if(b.hasAttribute('data-legacy-login')){clearAccount();login(false,true);return;}
     if(b.hasAttribute('data-register-owner')||b.hasAttribute('data-verify-owner')||b.hasAttribute('data-verify-email')){

@@ -1,8 +1,8 @@
-import {accountToken,clearAccount} from './account-client.js?v=20261127-v181';
+import {accountToken,clearAccount} from './account-client.js?v=20261128-v19';
 const API_ORIGIN = "https://burger-kiosk-9ardenx-api.epicowl12.chatgpt.site";
 const keyPrefix = "burger-kiosk.cloud.v1.";
 export function getStoreId(){const value=new URL(location.href).searchParams.get('store')??'1';return /^[1-9]\d{0,8}$/.test(value)?Number(value):1;}
-export function selectStore(id){const url=new URL(location.href);url.searchParams.set('store',String(id));location.assign(url.href);}
+export function selectStore(id,section){const url=new URL(location.href);url.searchParams.set('store',String(id));if(section)url.hash=section;location.assign(url.href);}
 for(const link of document.querySelectorAll('.mast a[href]')){const url=new URL(link.href);if(url.origin===location.origin){url.searchParams.set('store',String(getStoreId()));link.href=url.href;}}
 function customerKey() {
   let key=sessionStorage.getItem(keyPrefix+"customer"+(getStoreId()===1?"":"."+getStoreId()));
