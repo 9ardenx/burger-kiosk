@@ -1,0 +1,34 @@
+// Loopback-only Worker + migrated D1. The temporary entry mocks Firebase transport;
+// it imports the production handler and is never included in published source.
+const fs=require('node:fs'),path=require('node:path'),net=require('node:net'),assert=require('node:assert/strict'),{spawn}=require('node:child_process'),{randomUUID,createHash}=require('node:crypto');
+async function main(){
+ const cwd=path.resolve('sites/kiosk-api'),password=randomUUID(),project='isolated-v110';
+ const token=uid=>Buffer.from('{"alg":"RS256"}').toString('base64url')+'.'+Buffer.from(JSON.stringify({sub:uid,aud:project,iss:'https://securetoken.google.com/'+project,auth_time:Math.floor(Date.now()/1000)-10,exp:Math.floor(Date.now()/1000)+3600})).toString('base64url')+'.'+randomUUID();
+ const head=token('head'),owner=token('branch-owner');
+ const users={[head]:{localId:'head',email:'head@example.test',emailVerified:true,validSince:'0'},[owner]:{localId:'branch-owner',email:'owner@example.test',emailVerified:true,validSince:'0'}};
+ fs.writeFileSync(path.join(cwd,'.wrangler/v110-entry.mjs'),`import {handleKiosk} from '../worker/kiosk.mjs';\nconst users=${JSON.stringify(users)};\nexport default {fetch(request,env){env.AUTH_FETCH=async(url,options)=>{const user=users[JSON.parse(options.body).idToken];return Response.json(user?{users:[user]}:{error:{}},{status:user?200:400});};return handleKiosk(request,env);}};`);
+ fs.writeFileSync(path.join(cwd,'.wrangler/v110-runtime.json'),JSON.stringify({name:'isolated-v110-franchise',main:'v110-entry.mjs',compatibility_date:'2026-05-15',vars:{KIOSK_ADMIN_HASH:createHash('sha256').update(password).digest('hex'),FIREBASE_PROJECT_ID:project,FIREBASE_WEB_API_KEY:'test-only',KIOSK_OWNER_EMAIL:'head@example.test'},d1_databases:[{binding:'DB',database_name:'site-creator-d1',database_id:'00000000-0000-4000-8000-000000000000'}]}));
+ const probe=net.createServer();await new Promise(r=>probe.listen(0,'127.0.0.1',r));const port=probe.address().port;await new Promise(r=>probe.close(r));
+ const child=spawn(process.execPath,['--import','./scripts/sites-env.mjs','./node_modules/wrangler/bin/wrangler.js','dev','--config','.wrangler/v110-runtime.json','--local','--ip','127.0.0.1','--port',String(port),'--persist-to','.wrangler/v110-test'],{cwd,windowsHide:true,stdio:['ignore','pipe','pipe']});let logs='';child.stdout.on('data',b=>logs+=b);child.stderr.on('data',b=>logs+=b);
+ const base=`http://127.0.0.1:${port}`;let auth,store=1;
+ const api=async(p,data,expected=200)=>{const r=await fetch(base+p,{method:data===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Kiosk-Session':'v110-workerd-customer-session','X-Kiosk-Store':String(store),...(auth?{Authorization:'Bearer '+auth}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});const b=await r.json();assert.equal(r.status,expected,JSON.stringify(b));return b;};
+ try{
+  let ready=false;for(let i=0;i<150;i++){try{if((await fetch(base+'/api/menu')).ok){ready=true;break;}}catch{}await new Promise(r=>setTimeout(r,200));}assert.ok(ready,logs.slice(-1200));
+  auth=(await api('/api/admin/login',{password})).token;const original=await api('/api/admin/menu');
+  await api('/api/admin/claim-account',{id_token:head});auth=head;
+  const body={key:randomUUID(),address:'경기도 용인시 처인구 모현읍 외대로 81',source_store_id:1,owner_email:'owner@example.test'};
+  const [first,again,other]=await Promise.all([api('/api/account/stores',body),api('/api/account/stores',body),api('/api/account/stores',{...body,key:randomUUID()})]);assert.equal(first.store.id,again.store.id);assert.deepEqual([first.store.name,other.store.name].sort(),['용인모현점','용인모현2점'].sort());store=first.store.id;
+  auth=owner;const info=await api('/api/account');assert.deepEqual(info.stores.map(s=>s.id),[first.store.id,other.store.id].sort((a,b)=>a-b));
+  const copied=await api('/api/admin/menu');assert.equal(copied.menu.length,original.menu.length);assert.notEqual(copied.menu[0].id,original.menu[0].id);assert.notEqual(copied.menu[0].options[0].id,original.menu[0].options[0].id);
+  const m=copied.menu[0],o=m.options[0],order=await api('/api/orders',{key:randomUUID(),items:[{menu_id:m.id,options:[o.id],quantity:1,expected_unit:m.base_price+o.extra_price}]});
+  const paid=await api('/api/orders/'+order.id+'/attempts',{key:randomUUID(),demo_result:'success'});assert.equal(paid.number,1);
+  await api('/api/admin/orders/'+order.id,{expected:'PAID'});store=1;await api('/api/admin/orders',undefined,403);auth=head;assert.equal((await api('/api/admin/orders')).orders.length,0);assert.deepEqual((await api('/api/admin/menu')).menu,original.menu);
+  const today=new Date(Date.now()+9*3600000).toISOString().slice(0,10),period='?from='+today+'&to='+today;
+  const report=await api('/api/account/sales'+period);assert.equal(report.summary.orders,1);assert.equal(report.summary.net,m.base_price+o.extra_price);assert.equal(report.menus[0].code,'MENU-'+original.menu[0].id);assert.equal(report.stores.reduce((n,s)=>n+s.net,0),report.summary.net);
+  auth=owner;await api('/api/account/sales'+period,undefined,403);store=first.store.id;
+  const profile=await api('/api/admin/store-profile',{address:'경기도 성남시 분당구 서현로 170',locality:'서현동',address_detail:'1층',auto_name:true,revision:0});assert.equal(profile.store.name,'분당서현점');
+  await api('/api/admin/store-profile',{address:'경기도 성남시 분당구 서현로 170',locality:'서현동',revision:0},409);assert.equal((await api('/api/admin/orders')).orders.length,1);
+  const result={date:new Date().toISOString(),runtime:'workerd + D1',firebase:'mock transport',atomicOpening:true,concurrentNameSuffix:true,hqSalesReconcile:true,profileRevisionAndOrderPreservation:true,retryIdempotent:true,newMenuAndOptionIDs:true,ownerAllOperations:true,copiedMenuCheckout:true,crossStoreBlocked:true,sourcePreserved:true};fs.writeFileSync('data/qa/v1.10/worker-results.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+ }finally{await new Promise(resolve=>{spawn('taskkill',['/pid',String(child.pid),'/T','/F'],{windowsHide:true,stdio:'ignore'}).on('close',resolve);});}
+}
+main().catch(e=>{console.error(e.message);process.exitCode=1;});

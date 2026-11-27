@@ -5,15 +5,15 @@ import {createHash,randomUUID} from 'node:crypto';
 import {handleKiosk} from '../cloud/api.mjs';
 export async function setup(t) {
   const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
-  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql','v17-migration.sql','v18-migration.sql','v19-migration.sql','promotion-pricing.sql'])
+  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql','v17-migration.sql','v18-migration.sql','v19-migration.sql','v110-migration.sql','promotion-pricing.sql'])
     sqlite.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
   const DB={prepare(sql){
     const make=args=>({sql,bind:(...values)=>make(values),
       async all(){return {results:sqlite.prepare(sql).all(...args),meta:{changes:0}};},
       async first(){return sqlite.prepare(sql).get(...args)??null;},
       async run(){return {meta:{changes:Number(sqlite.prepare(sql).run(...args).changes)}};},
-      execute(){return /^\s*SELECT/i.test(sql)?{results:sqlite.prepare(sql).all(...args),meta:{changes:0}}:
-        {meta:{changes:Number(sqlite.prepare(sql).run(...args).changes)}};}
+      execute(){const query=sqlite.prepare(sql);return query.columns().length?{results:query.all(...args),meta:{changes:0}}:
+        {meta:{changes:Number(query.run(...args).changes)}};}
     });return make([]);
   },async batch(commands){sqlite.exec('BEGIN');try{const result=commands.map(c=>c.execute());sqlite.exec('COMMIT');return result;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
   const images=new Map(),BUCKET={async put(key,bytes){images.set(key,new Uint8Array(bytes));},async get(key){return images.has(key)?{body:images.get(key)}:null;}};

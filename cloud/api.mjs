@@ -1,4 +1,6 @@
 import {franchiseStores} from './franchise.mjs';
+import {storeProfile,saveStoreProfile} from './store-profile.mjs';
+import {hqSales} from './hq-sales.mjs';
 import {accountConfig,legacyEnabled,principal,accountInfo,authorizeStore,claimAccount,listMembers,inviteMember,changeMember,revokeInvitation,createStore} from './accounts.mjs';
 import {storeId,storeDb,resolveStore} from './store-context.mjs';
 import {validateGroups, evaluateGroups} from "../docs/assets/choice-rules.js";
@@ -302,6 +304,7 @@ async function adminRoute(db,env,path,request,body) {
   }
   if(['/api/admin/security','/api/admin/password','/api/admin/recovery-code'].includes(path))check(actor.legacy,'이메일 계정의 비밀번호 복구를 이용해 주세요.',403,'ACCOUNT_LOGIN_REQUIRED');
   if(path==='/api/admin/promotions')return body?savePromotions(db,body):promotionState(db);
+  if(path==='/api/admin/store-profile')return body?saveStoreProfile(db,actor,body):storeProfile(db);
   if(path==='/api/admin/sales'&&!body)return salesReport(db,new URL(request.url).searchParams);
   if(path==='/api/admin/inventory'&&!body)return inventoryState(db);
   const inventoryMatch=path.match(/^\/api\/admin\/inventory\/(\d+)$/);
@@ -359,6 +362,7 @@ async function dispatch(request,env,path) {
   if(path==='/api/auth/config'&&!body)return accountConfig(db,env);
   if(path==='/api/account'&&!body)return accountInfo(db,await principal(db,env,request));
   if(path==='/api/account/stores'){const actor=await principal(db,env,request);return body?createStore(db,actor,body):franchiseStores(db,actor);}
+  if(path==='/api/account/sales'&&!body)return hqSales(db,await principal(db,env,request),new URL(request.url).searchParams);
   const store=await resolveStore(db,request);db=storeDb(db,store.id);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
   if(path==='/api/ads'&&!body)return adState(db,true);

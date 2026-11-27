@@ -75,8 +75,12 @@ export const inventoryMovement = sqliteTable('inventory_movement', {
 
 export const stores = sqliteTable('store', {
  id:integer().primaryKey({autoIncrement:true}),name:text().notNull(),enabled:integer().notNull().default(1),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`),
- opening_key:text(),opening_signature:text(),opening_tag:text(),template_store_id:integer()
+ opening_key:text(),opening_signature:text(),opening_tag:text(),template_store_id:integer(),
+ address:text(),address_detail:text(),locality:text(),address_pending:integer().notNull().default(0),profile_revision:integer().notNull().default(0)
 },t=>[uniqueIndex('store_opening_key_unique').on(t.opening_key)]);
+export const menuIdentity=sqliteTable('menu_identity',{
+ menu_id:integer().primaryKey().references(()=>menus.id),product_code:text().notNull()
+},t=>[index('menu_identity_product').on(t.product_code)]);
 export const staffAccounts = sqliteTable('staff_account', {
  uid:text().primaryKey(),email:text().notNull(),platform_role:text().notNull().default('USER'),enabled:integer().notNull().default(1),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
 },t=>[check('account_role',sql`${t.platform_role} IN ('USER','HQ')`)]);

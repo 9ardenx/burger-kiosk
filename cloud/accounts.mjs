@@ -46,8 +46,8 @@ export async function principal(db,env,request){
 }
 export async function accountInfo(db,actor){
  const stores=actor.legacy?{results:[{id:1,name:(await db.prepare('SELECT name FROM store WHERE id=1').first()).name,role:'OWNER'}]}:
-  actor.platform_role==='HQ'?await db.prepare("SELECT id,name,'HQ' AS role FROM store WHERE enabled=1 ORDER BY id").all():
-  await stmt(db,`SELECT s.id,s.name,m.role FROM store s JOIN store_member m ON m.store_id=s.id WHERE m.uid=? AND m.enabled=1 AND s.enabled=1 ORDER BY s.id`,actor.uid).all();
+  actor.platform_role==='HQ'?await db.prepare("SELECT id,name,address_pending,'HQ' AS role FROM store WHERE enabled=1 ORDER BY id").all():
+  await stmt(db,`SELECT s.id,s.name,s.address_pending,m.role FROM store s JOIN store_member m ON m.store_id=s.id WHERE m.uid=? AND m.enabled=1 AND s.enabled=1 ORDER BY s.id`,actor.uid).all();
  return {uid:actor.uid,email:actor.email??null,legacy:actor.legacy,platform_role:actor.platform_role,stores:stores.results};
 }
 export async function authorizeStore(db,actor){

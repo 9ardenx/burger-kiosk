@@ -1,5 +1,5 @@
-import {escapeText} from './common.js?v=20261128-v19';
-import {adPhotoUrl} from './backend.js?v=20261128-v19';
+import {escapeText} from './common.js?v=20261128-v110';
+import {adPhotoUrl} from './backend.js?v=20261128-v110';
 export function adList(items){
   return `<div class="heading split"><div><h1>광고 관리</h1><p>키오스크 첫 화면에 보여 줄 소식을 관리합니다.</p></div><button class="primary" data-new-ad ${items.length>=10?'disabled':''}>+ 광고 등록</button></div>
   <p class="info-note ad-help">첫 화면 소식 → 우선 광고 → 최신 등록 메뉴 → 일반 광고 순으로 1분마다 넘어갑니다.<br>사진이 있고 판매 가능한 메뉴는 최신 등록순으로 자동 소개됩니다. 광고 등록/수정에서 <strong>메뉴 소개보다 먼저 노출</strong>을 선택하면 관리자가 메뉴 소개보다 광고를 앞세울 수 있습니다. 같은 노출 위치 안에서는 아래 목록 순서를 따릅니다. 광고는 최대 10개입니다.</p>
