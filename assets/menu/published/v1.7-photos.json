@@ -1,0 +1,86 @@
+{
+  "method": "Existing app uploader: aspect-preserving center crop and JPEG encoding; untouched originals retained in the local photo backup.",
+  "photos": [
+    {
+      "name": "모닝버거세트",
+      "file": "assets/menu/published/morning-burger-set.jpg",
+      "width": 720,
+      "height": 465,
+      "bytes": 44098,
+      "source_sha256": "22630031aa5bc4fbcd9a14d0c17a25c9546be93ff577c04af1340127bd2357ea",
+      "sha256": "23926c3ea4e953f2baaed30c55f87571648d4834c71e0b99ca983d56a9713343"
+    },
+    {
+      "name": "새우또띠아",
+      "file": "assets/menu/published/shrimp-tortilla.jpg",
+      "width": 720,
+      "height": 465,
+      "bytes": 42422,
+      "source_sha256": "657d7088c2d2da5b833fff046e4daae8db16500bcd064c1195e56cd63b79b461",
+      "sha256": "318e9e4663a2a04a0733dc8a52594804601113cf822aeeb0544f3c7f73d7ab43"
+    },
+    {
+      "name": "치킨또띠아",
+      "file": "assets/menu/published/chicken-tortilla.jpg",
+      "width": 720,
+      "height": 465,
+      "bytes": 42407,
+      "source_sha256": "db1e5e787c72c760a20db04fc9adaff4cbf240f72afafe5c75aa973a6a0d744f",
+      "sha256": "49b92995eabd05e96538173dea1739baf891a425802f0bde3a37e752534876f6"
+    },
+    {
+      "name": "치즈스틱",
+      "file": "assets/menu/published/cheese-sticks.jpg",
+      "width": 720,
+      "height": 465,
+      "bytes": 42319,
+      "source_sha256": "175157be9f6c1d05dfa70706fbab675f52258e0984de646f101cc34a23753c28",
+      "sha256": "15b4e8383b5ed70fb86835b6594c8f28c119efe2599ae8f1e6dae306c42f9840"
+    },
+    {
+      "name": "아이스크림",
+      "file": "assets/menu/published/ice-cream.jpg",
+      "width": 720,
+      "height": 465,
+      "bytes": 27657,
+      "source_sha256": "a2f65f827bd99b179abb4929a9cef589b79384f476a8f85846c752821b3741f2",
+      "sha256": "c8e3bc947a11035f8f7098c73de8c81abfa67bf9fa429d37de9da73f5ea78f32"
+    },
+    {
+      "name": "머스타드소스",
+      "file": "assets/menu/published/mustard-sauce.jpg",
+      "width": 720,
+      "height": 465,
+      "bytes": 35054,
+      "source_sha256": "87349ded146f0d2d05148fdf717f6aceee9263b44e1cf6ab2ef0a6e2c73471f5",
+      "sha256": "19450217a1396957bebb3b0e9f665c61b9cce056e80f9cb2f5678c6facbbcacc"
+    },
+    {
+      "name": "살사소스",
+      "file": "assets/menu/published/salsa-sauce.jpg",
+      "width": 720,
+      "height": 465,
+      "bytes": 38008,
+      "source_sha256": "d43689c893fa7c4d0e8695ad654b7236f5c5429189c296f971be454d11072152",
+      "sha256": "6dee31e9eb33295ae3e7518dce880768a8bc8a66955062bacf4ac4547646fb1b"
+    },
+    {
+      "name": "케첩소스",
+      "file": "assets/menu/published/ketchup-sauce.jpg",
+      "width": 720,
+      "height": 465,
+      "bytes": 37148,
+      "source_sha256": "c8195b62c6f00764db6e234f1ea61753b95621e76d7020db39d30b940c74ae1c",
+      "sha256": "d9dfacd6d7bea1d21cb544c3f1a2f66bff73819ee7f728089085025afc4f3207"
+    },
+    {
+      "name": "신메뉴사진",
+      "file": "assets/ads/published/new-products.jpg",
+      "width": 1440,
+      "height": 810,
+      "bytes": 130732,
+      "source_sha256": "165d1280ba783c66174ac88f08d517cc4201283c8c7957f149eeddf3d49fe1d9",
+      "sha256": "7cd015938e2b7ad2b7bd0360905b9b675479bcbc98addc5d4a33be461ad31133"
+    }
+  ]
+}

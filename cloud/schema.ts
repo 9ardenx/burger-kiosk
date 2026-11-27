@@ -24,6 +24,7 @@ export const items = sqliteTable("order_item", {
   menu_id: integer().notNull().references(() => menus.id), name: text().notNull(),
   choice_snapshot: text().notNull().default("[]"),
   quantity: integer().notNull(), price: integer().notNull()
+  ,regular_price: integer(), promotion: text()
 }, t => [index("items_by_order").on(t.order_id)]);
 export const choices = sqliteTable("order_item_option", {
   id: text().primaryKey(), item_id: text().notNull().references(() => items.id),
@@ -55,6 +56,9 @@ export const authAttempt = sqliteTable('auth_attempt', {
   key: text().primaryKey(), count: integer().notNull().default(0), expires: integer().notNull()
 });
 export const adCatalog = sqliteTable('ad_catalog', {
+  id: integer().primaryKey(), items: text().notNull().default('[]'), revision: integer().notNull().default(0)
+});
+export const promotionCatalog = sqliteTable('promotion_catalog', {
   id: integer().primaryKey(), items: text().notNull().default('[]'), revision: integer().notNull().default(0)
 });
 

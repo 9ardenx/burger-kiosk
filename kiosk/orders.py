@@ -6,6 +6,7 @@ from uuid import uuid4
 from .variants import resolve_choices
 from .store import Problem, identifier, integer
 from .inventory import check_stock
+from .promotions import priced_menu
 
 NEXT_STATE = {"PAID": "PREPARING", "PREPARING": "READY", "READY": "COMPLETED"}
 
@@ -23,7 +24,7 @@ def order_view(db, row):
         options = [dict(opt) for opt in db.execute(
             "SELECT name,option_price FROM order_item_option WHERE order_item_id=? ORDER BY id", (item["id"],)
         )]
-        items.append({"name": item["name"], "quantity": item["quantity"], "price": item["item_price"], "options": json.loads(item["choice_snapshot"]) + options})
+        items.append({"name": item["name"], "quantity": item["quantity"], "price": item["item_price"], "regular_price": item['regular_price'], "promotion": json.loads(item['promotion']) if item['promotion'] else None, "options": json.loads(item["choice_snapshot"]) + options})
     payment = db.execute(
         "SELECT id,status,mode,pg_tid IS NOT NULL AS has_key FROM payment WHERE order_id=? ORDER BY rowid DESC LIMIT 1",
         (row["id"],),
@@ -43,6 +44,7 @@ def quote_item(db, line):
     if not item or item["is_sold_out"]:
         name = item["name"] if item else "선택한 메뉴"
         raise Problem(f"{name} 품절 · 장바구니를 수정해 주세요.", 409, "CART_CHANGED")
+    item = priced_menu(item, db.execute('SELECT * FROM menu_pricing WHERE id=?', (menu_id,)).fetchone())
     choices = line.get("options")
     if not isinstance(choices, list) or len(choices)>20 or any(type(x) is not int for x in choices):
         raise Problem("선택 옵션을 확인해 주세요.")
@@ -85,8 +87,8 @@ def create_order(db, customer, data):
                (order_id, customer, key, signature, total, dining_type))
     for item, options, snapshot, quantity, _ in lines:
         result = db.execute(
-            "INSERT INTO order_item(order_id,menu_id,name,item_price,quantity,choice_snapshot) VALUES(?,?,?,?,?,?)",
-            (order_id, item["id"], item["name"], item["base_price"], quantity, json.dumps(snapshot, ensure_ascii=False)),
+            "INSERT INTO order_item(order_id,menu_id,name,item_price,quantity,choice_snapshot,regular_price,promotion) VALUES(?,?,?,?,?,?,?,?)",
+            (order_id, item["id"], item["name"], item["base_price"], quantity, json.dumps(snapshot, ensure_ascii=False), item['original_price'], json.dumps(item['promotion'], ensure_ascii=False) if item['promotion'] else None),
         )
         db.executemany("INSERT INTO order_item_option(order_item_id,option_id,name,option_price) VALUES(?,?,?,?)",
                        [(result.lastrowid, opt["id"], opt["name"], opt["extra_price"]) for opt in options])

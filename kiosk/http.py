@@ -17,6 +17,7 @@ from .categories import category_state, save_categories
 from .advertising import ad_state, save_ads
 from .inventory import inventory_state, save_inventory
 from .sales import sales_report
+from .promotions import promotion_state, save_promotions
 from .menu_admin import save_listing
 from .store import Problem, connection, edit_menu, menu_list, menu_order_state, reorder_menu
 
@@ -76,7 +77,7 @@ class Handler(BaseHTTPRequestHandler):
             with connection(server.db_path) as db: return ad_state(db, public=True)
         if route == "/api/menu" and data is None:
             with connection(server.db_path) as db:
-                return {"menu": menu_list(db, all_items=True, public=True), "categories": category_state(db)['items'], "mode": server.gateway.mode, "clientKey": server.gateway.client_key}
+                return {"menu": menu_list(db, all_items=True, public=True), "categories": category_state(db)['items'], "mode": server.gateway.mode, "clientKey": server.gateway.client_key, "server_time": db.execute("SELECT unixepoch('now')*1000").fetchone()[0]}
         if route == "/api/admin/login" and data is not None:
             revision = admin_auth.login(server.db_path, server.password, data.get('password'))
             token = secrets.token_urlsafe(32)
@@ -105,6 +106,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.cookie("admin_session", "", clear=True)
                 return {"ok": True}
             with connection(server.db_path, write=data is not None) as db:
+                if route == '/api/admin/promotions':
+                    return save_promotions(db, data) if data is not None else promotion_state(db)
                 if route == '/api/admin/sales' and data is None:
                     query = parse_qs(urlsplit(self.path).query)
                     return sales_report(db, query.get('from', [None])[0], query.get('to', [None])[0])

@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from .orders import order_view, owner_order
 from .store import Problem, connection, identifier
+from .promotions import check_promotion_price
 
 
 class Gateway:
@@ -85,6 +86,7 @@ def begin(db, gateway, order_id, customer, data):
     if gateway.mode != 'demo' and db.execute('''SELECT 1 FROM inventory s JOIN order_item i ON i.menu_id=s.menu_id
             WHERE i.order_id=? AND s.enabled=1''', (order_id,)).fetchone():
         raise Problem('수량 관리 메뉴는 현재 모의 결제에서만 주문할 수 있습니다. PG 재고 예약 연동이 필요합니다.', 409, 'PG_INVENTORY_UNSUPPORTED')
+    check_promotion_price(db, order_id)
     attempt_id = uuid4().hex
     db.execute("INSERT INTO payment(id,order_id,request_key,mode,amount,status) VALUES(?,?,?,?,?,'PENDING')",
                (attempt_id, order_id, key, gateway.mode, row["total_amount"]))

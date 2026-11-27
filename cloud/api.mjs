@@ -6,6 +6,7 @@ import {loginAdmin,requireAdmin,securityInfo,changePassword,issueRecovery,resetP
 import {adState,saveAds} from './advertising.mjs';
 import {inventoryState,saveInventory,checkStock} from './inventory.mjs';
 import {salesReport} from './sales.mjs';
+import {promotionState,savePromotions,pricedMenu} from './promotions.mjs';
 
 const FRONTEND = "https://9ardenx.github.io";
 const NEXT = Object.freeze({PAID:"PREPARING", PREPARING:"READY", READY:"COMPLETED"});
@@ -38,23 +39,25 @@ async function catalog(db, includeSold=false, publicView=false) {
         JSON.stringify(sodaGroups.map(g=>({...g,when_extra:'탄산음료 감자튀김'}))))
     ]);
   }
-  const [menus,options,displayOrder,stock]=await db.batch([
+  const [menus,options,displayOrder,stock,quotes]=await db.batch([
     db.prepare("SELECT id,name,description,kind,base_price,is_sold_out,version,category,photo_key,choice_groups FROM menu " + (includeSold?"":"WHERE is_sold_out=0 ") + "ORDER BY id"),
     db.prepare("SELECT id,menu_id,name,extra_price FROM menu_option WHERE active=1 ORDER BY id"),
     db.prepare("SELECT menu_ids,revision FROM menu_display_order WHERE id=1"),
-    db.prepare('SELECT menu_id FROM inventory WHERE enabled=1 AND quantity=0')
+    db.prepare('SELECT menu_id FROM inventory WHERE enabled=1 AND quantity=0'),
+    db.prepare('SELECT * FROM menu_pricing')
   ]);
   const positions=new Map(JSON.parse(displayOrder.results[0]?.menu_ids??"[]").map((id,i)=>[id,i]));
   const exhausted=new Set(stock.results.map(s=>s.menu_id));
   return menus.results.map(menu=>({...menu,stock_sold_out:exhausted.has(menu.id),
     is_sold_out:publicView?Number(Boolean(menu.is_sold_out||exhausted.has(menu.id))):menu.is_sold_out,
     choice_groups:JSON.parse(menu.choice_groups), options:options.results.filter(o=>o.menu_id===menu.id)}))
+    .map(m=>publicView?pricedMenu(m,quotes.results.find(q=>q.id===m.id)):m)
     .sort((a,b)=>(positions.get(a.id)??positions.size)-(positions.get(b.id)??positions.size)||a.id-b.id);
 }
 
 const orderSelect = `SELECT o.id,o.number,CASE WHEN o.cancelled_at IS NOT NULL THEN 'CANCELLED' ELSE o.status END AS status,o.total,o.created_at,
   o.cancelled_at,o.cancelled_by,o.cancel_reason,o.dining_type,o.restock_on_cancel,
-  (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,'variants',json(i.choice_snapshot),
+  (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,'regular_price',i.regular_price,'promotion',json(i.promotion),'variants',json(i.choice_snapshot),
     'options',json((SELECT json_group_array(json_object('name',x.name,'option_price',x.option_price))
       FROM order_item_option x WHERE x.item_id=i.id)))) FROM order_item i WHERE i.order_id=o.id) AS items,
   (SELECT json_object('id',p.id,'status',p.status,'mode',p.mode) FROM payment p
@@ -79,7 +82,7 @@ async function createOrder(db,customer,body) {
     check(previous.signature===signature&&previous.dining_type===diningType,"이미 사용된 주문 요청입니다.",409);
     return readOrder(db,id,customer);
   }
-  const menus=await catalog(db,true);
+  const menus=await catalog(db,true,true);
   let total=0;
   const lines=cart.map(line=>{
     check(line && Number.isInteger(line.quantity) && line.quantity>=1 && line.quantity<=99,"수량을 확인해 주세요.");
@@ -100,17 +103,17 @@ async function createOrder(db,customer,body) {
   });
   await checkStock(db,cart);
   const tag=crypto.randomUUID();
-  const menuVersions=[...new Map(lines.map(l=>[l.menu.id,l.menu.version]))];
-  const versionChecks=menuVersions.map(()=>"(id=? AND version=?)").join(" OR ");
+  const menuVersions=[...new Map(lines.map(l=>[l.menu.id,[l.menu.id,l.menu.version,l.menu.base_price,l.menu.promotion?.id??'']])).values()];
+  const versionChecks=menuVersions.map(()=>"(m.id=? AND m.version=? AND q.sale_price=? AND coalesce(q.promotion_id,'')=?)").join(" OR ");
   const commands=[statement(db,`INSERT OR IGNORE INTO orders(id,customer,signature,total,creation_tag,dining_type)
-    SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM menu WHERE is_sold_out=0 AND (${versionChecks}))=?`,
+    SELECT ?,?,?,?,?,? WHERE (SELECT count(*) FROM menu m JOIN menu_pricing q ON q.id=m.id WHERE m.is_sold_out=0 AND (${versionChecks}))=?`,
     id,customer,signature,total,tag,diningType,...menuVersions.flat(),menuVersions.length)];
   // A retried or concurrent request can write items only if it created this order.
   const created="EXISTS(SELECT 1 FROM orders WHERE id=? AND creation_tag=?)";
   for(const line of lines){
     const itemId=crypto.randomUUID();
-    commands.push(statement(db,`INSERT INTO order_item(id,order_id,menu_id,name,quantity,price,choice_snapshot)
-      SELECT ?,?,?,?,?,?,? WHERE ${created}`,itemId,id,line.menu.id,line.menu.name,line.quantity,line.menu.base_price,JSON.stringify(line.snapshot),id,tag));
+    commands.push(statement(db,`INSERT INTO order_item(id,order_id,menu_id,name,quantity,price,choice_snapshot,regular_price,promotion)
+      SELECT ?,?,?,?,?,?,?,?,? WHERE ${created}`,itemId,id,line.menu.id,line.menu.name,line.quantity,line.menu.base_price,JSON.stringify(line.snapshot),line.menu.original_price,line.menu.promotion?JSON.stringify(line.menu.promotion):null,id,tag));
     for(const opt of line.options) commands.push(statement(db,`INSERT INTO order_item_option(id,item_id,option_id,name,option_price)
       SELECT ?,?,?,?,? WHERE ${created}`,crypto.randomUUID(),itemId,opt.id,opt.name,opt.extra_price,id,tag));
   }
@@ -280,6 +283,7 @@ async function adminRoute(db,env,path,request,body) {
   if(path==='/api/admin/login'&&body)return loginAdmin(db,env,request,body);
   if(path==='/api/admin/reset-password'&&body)return resetPassword(db,request,body);
   const hash=await requireAdmin(db,request);
+  if(path==='/api/admin/promotions')return body?savePromotions(db,body):promotionState(db);
   if(path==='/api/admin/sales'&&!body)return salesReport(db,new URL(request.url).searchParams);
   if(path==='/api/admin/inventory'&&!body)return inventoryState(db);
   const inventoryMatch=path.match(/^\/api\/admin\/inventory\/(\d+)$/);
@@ -336,7 +340,7 @@ async function dispatch(request,env,path) {
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
   if(path==='/api/ads'&&!body)return adState(db,true);
-  if(path==="/api/menu" && !body)return {menu:await catalog(db,true,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:""};
+  if(path==="/api/menu" && !body)return {menu:await catalog(db,true,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:"",server_time:(await db.prepare("SELECT unixepoch('now')*1000 AS now").first()).now};
   const token=request.headers.get("X-Kiosk-Session");
   check(validKey(token),"고객 세션을 확인해 주세요.",401);
   const customer=await digest(token);
@@ -368,6 +372,8 @@ async function handleKiosk(request,env) {
     return Response.json(await dispatch(request,env,path),{headers});
   }
   catch(e){
+    if((String(e?.message)+' '+String(e?.cause?.message)).includes('PROMOTION_CHANGED'))
+      return Response.json({error:'할인 시간이 지났거나 가격이 변경되었습니다. 새 금액을 확인해 주세요.',code:'CART_CHANGED'},{status:409,headers});
     if((String(e?.message)+' '+String(e?.cause?.message)).includes('STOCK_UNAVAILABLE'))
       return Response.json({error:'판매 가능 수량이 부족합니다. 최신 메뉴를 확인하고 장바구니 수량을 줄여 주세요.',code:'CART_CHANGED'},{status:409,headers});
     if(e instanceof Problem)return Response.json({error:e.message,code:e.code},{status:e.status,headers});

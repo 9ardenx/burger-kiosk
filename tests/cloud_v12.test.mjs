@@ -5,6 +5,53 @@ import {readFileSync} from 'node:fs';
 import {createHash, randomUUID} from 'node:crypto';
 import {handleKiosk} from '../cloud/api.mjs';
 
+const campaign=(extra={})=>({id:randomUUID(),title:'시간 할인',enabled:true,menu_ids:[1],weekdays:[0,1,2,3,4,5,6],start_time:'00:00',end_time:'24:00',start_date:null,end_date:null,mode:'PERCENT',value:20,...extra});
+function freezePricing(sqlite,when){sqlite.exec('DROP VIEW menu_pricing;DROP VIEW active_promotions;'+readFileSync(new URL('../cloud/promotion-pricing.sql',import.meta.url),'utf8').replace("datetime('now','+9 hours')",`datetime('${when}')`));}
+test('v1.7 KST windows include start, exclude end, and anchor overnight to the starting weekday and date',async t=>{
+ const {call,sqlite}=await setup(t);
+ const p=campaign({start_time:'22:00',end_time:'02:00',weekdays:[5],start_date:'2026-11-27',end_date:'2026-11-27'});
+ assert.equal((await call('/api/admin/promotions',{items:[p],revision:0})).status,200);
+ for(const [when,price] of [['2026-11-27 21:59:59',5500],['2026-11-27 22:00:00',4400],['2026-11-28 01:59:59',4400],['2026-11-28 02:00:00',5500],['2026-12-04 22:00:00',5500]]){freezePricing(sqlite,when);assert.equal((await call('/api/menu')).data.menu[0].base_price,price,when);}
+});
+test('v1.7 cheapest offer does not stack, options keep full price, admin normal prices and paid snapshots remain',async t=>{
+ const {call,pay}=await setup(t),p=campaign({mode:'FIXED',value:4000});
+ assert.equal((await call('/api/admin/promotions',{revision:0,items:[campaign(),p]})).status,200);
+ const m=(await call('/api/menu')).data.menu[0];assert.equal(m.base_price,4000);assert.equal(m.original_price,5500);assert.equal(m.promotion.id,p.id);
+ assert.equal((await call('/api/admin/menu')).data.menu[0].base_price,5500);
+ const r=await call('/api/orders',{key:randomUUID(),items:[{menu_id:1,quantity:2,options:[1],expected_unit:4500}]});assert.equal(r.status,200);assert.equal(r.data.total,9000);
+ const paid=await pay(r.data.id);assert.equal(paid.status,200);assert.equal(paid.data.items[0].regular_price,5500);
+ await call('/api/admin/promotions',{revision:1,items:[]});assert.deepEqual((await pay(r.data.id)).data,paid.data);
+});
+test('v1.7 expiry and changed campaigns roll back approval and inventory atomically',async t=>{
+ const {call,pay,sqlite}=await setup(t),p=campaign({start_time:'11:00',end_time:'14:00'});
+ await call('/api/admin/promotions',{items:[p],revision:0});freezePricing(sqlite,'2026-11-27 13:59:59');
+ await call('/api/admin/inventory/1',{enabled:true,quantity:3,low_threshold:1,revision:0,reason:'검증'});
+ const r=await call('/api/orders',{key:randomUUID(),items:[{menu_id:1,quantity:2,options:[],expected_unit:4400}]});assert.equal(r.status,200);
+ freezePricing(sqlite,'2026-11-27 14:00:00');const failed=await pay(r.data.id);assert.equal(failed.status,409);assert.equal(failed.data.code,'CART_CHANGED');
+ assert.equal(sqlite.prepare('SELECT count(*) n FROM payment').get().n,0);assert.equal(sqlite.prepare('SELECT quantity FROM inventory').get().quantity,3);
+ assert.equal(sqlite.prepare("SELECT count(*) n FROM inventory_movement WHERE kind='SALE'").get().n,0);
+ assert.equal((await call('/api/orders',{key:randomUUID(),items:[{menu_id:1,quantity:1,options:[],expected_unit:4400}]})).status,409);
+});
+test('v1.7 auth, concurrent edits, validation and disabled schedules',async t=>{
+ const {call}=await setup(t),p=campaign();assert.equal((await call('/api/admin/promotions',undefined,undefined,false)).status,401);
+ assert.equal((await call('/api/admin/promotions',{items:[p],revision:0},undefined,false)).status,401);
+ const r=await Promise.all([call('/api/admin/promotions',{items:[p],revision:0}),call('/api/admin/promotions',{items:[p],revision:0})]);assert.deepEqual(r.map(x=>x.status).sort(),[200,409]);
+ for(const invalid of [{value:true},{value:100},{mode:'FIXED',value:5500},{menu_ids:[]},{weekdays:[true]},{start_date:'2026-02-30'},{end_time:'00:00'}])assert.equal((await call('/api/admin/promotions',{revision:1,items:[{...p,...invalid}]})).status,400);
+ assert.equal((await call('/api/admin/promotions',{revision:1,items:[{...p,enabled:false}]})).status,200);assert.equal((await call('/api/menu')).data.menu[0].base_price,5500);
+});
+test('v1.7 newly active discount invalidates old quote and lower regular prices never increase',async t=>{
+ const {call,create,pay,sqlite}=await setup(t),old=await create(),p=campaign({mode:'FIXED',value:4000});
+ await call('/api/admin/promotions',{revision:0,items:[p]});assert.equal((await pay(old.id)).status,409);
+ sqlite.exec('UPDATE menu SET base_price=3000 WHERE id=1');assert.equal((await call('/api/menu')).data.menu[0].base_price,3000);
+});
+test('v1.7 additive migration preserves existing menu and paid item amounts',t=>{
+ const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+ for(const f of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql'])db.exec(readFileSync(new URL('../cloud/'+f,import.meta.url),'utf8'));
+ db.exec("INSERT INTO menu(id,name,description,kind,base_price,photo_key) VALUES(1,'이전 메뉴','','custom',5000,'original');INSERT INTO orders(id,customer,signature,total,creation_tag,status,number) VALUES('old','customer','s',5000,'tag','PAID',1);INSERT INTO order_item(id,order_id,menu_id,name,quantity,price) VALUES('item','old',1,'이전 메뉴',1,5000)");
+ const before=db.prepare('SELECT * FROM order_item').get();for(const f of ['v17-migration.sql','promotion-pricing.sql'])db.exec(readFileSync(new URL('../cloud/'+f,import.meta.url),'utf8'));
+ const after=db.prepare('SELECT * FROM order_item').get();for(const [k,v] of Object.entries(before))assert.equal(after[k],v);assert.equal(after.promotion,null);assert.equal(db.prepare('SELECT photo_key FROM menu').get().photo_key,'original');assert.equal(db.prepare('SELECT sale_price FROM menu_pricing').get().sale_price,5000);
+});
+
 test('v1.6 additive migration preserves v1.5 menu, photo, option, ad and paid order snapshots',t=>{
   const db=new DatabaseSync(':memory:');t.after(()=>db.close());
   for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql'])db.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
@@ -99,7 +146,7 @@ test('v1.6 sales protect private data and reject invalid and oversized ranges',a
 // Exercise the real Worker routes and SQL with an in-memory SQLite D1 adapter.
 async function setup(t) {
   const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
-  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql'])
+  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql','v17-migration.sql','promotion-pricing.sql'])
     sqlite.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
   const DB={prepare(sql){
     const make=args=>({sql,bind:(...values)=>make(values),
@@ -175,7 +222,7 @@ test('Worker persists full menu order and rejects stale, missing or duplicate ID
   assert.equal((await call('/api/admin/menu-order',{ids,revision:0})).status,200);
   const saved=(await call('/api/admin/menu')).data;
   assert.deepEqual(saved.menu.map(m=>m.id),ids);assert.equal(saved.order_revision,1);
-  assert.deepEqual(saved.menu,menu.toReversed());
+  assert.deepEqual(saved.menu,menu.toReversed().map(({original_price,promotion,...m})=>m));
   assert.equal((await call('/api/admin/menu-order',{ids:ids.toReversed(),revision:0})).status,409);
   assert.equal((await call('/api/admin/menu-order',{ids:ids.slice(1),revision:1})).status,409);
   assert.equal((await call('/api/admin/menu-order',{ids:[ids[0],ids[0]],revision:1})).status,400);
@@ -273,7 +320,7 @@ test('v1.4 category removal racing menu creation cannot leave an orphan',async t
 test('v1.4 category validation failure cannot deactivate existing options',async t=>{
   const {call,menu}=await setup(t),item=menu[0];
   assert.equal((await call('/api/admin/menu/'+item.id,{...item,is_sold_out:false,category:'missing',options:[]})).status,409);
-  assert.deepEqual((await call('/api/admin/menu')).data.menu,menu);
+  assert.deepEqual((await call('/api/admin/menu')).data.menu,menu.map(({original_price,promotion,...m})=>m));
 });
 
 test('v1.4 password change rejects wrong current password, revokes sessions and disables bootstrap',async t=>{

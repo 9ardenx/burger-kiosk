@@ -1,0 +1,3 @@
+CREATE TABLE promotion_catalog(id INTEGER PRIMARY KEY,items TEXT NOT NULL DEFAULT '[]',revision INTEGER NOT NULL DEFAULT 0);
+ALTER TABLE order_item ADD COLUMN regular_price INTEGER;
+ALTER TABLE order_item ADD COLUMN promotion TEXT;

@@ -35,6 +35,8 @@ def connection(path, *, write=False):
         try:
             yield db
         except sqlite3.IntegrityError as exc:
+            if 'PROMOTION_CHANGED' in str(exc):
+                raise Problem('할인 시간이 지났거나 가격이 변경되었습니다. 새 금액을 확인해 주세요.', 409, 'CART_CHANGED') from exc
             if 'STOCK_UNAVAILABLE' in str(exc):
                 raise Problem('판매 가능 수량이 부족합니다. 최신 메뉴를 확인하고 장바구니 수량을 줄여 주세요.', 409, 'CART_CHANGED') from exc
             raise
@@ -53,7 +55,7 @@ def initialize(path):
         upgrade_choices = "choice_groups" not in {r[1] for r in db.execute("PRAGMA table_info(menu)")}
         for table, additions in (
             ("menu", {"category": "TEXT NOT NULL DEFAULT 'burger'", "photo_key": "TEXT", "registration_key": "TEXT", "choice_groups": "TEXT NOT NULL DEFAULT '[]'"}),
-            ("order_item", {"choice_snapshot": "TEXT NOT NULL DEFAULT '[]'"}),
+            ("order_item", {"choice_snapshot": "TEXT NOT NULL DEFAULT '[]'", "regular_price": "INTEGER", "promotion": "TEXT"}),
             ("orders", {"cancelled_at": "TEXT", "cancelled_by": "TEXT", "cancel_reason": "TEXT", "dining_type": "TEXT", "restock_on_cancel": "INTEGER"}),
             ("menu_option", {"active": "INTEGER NOT NULL DEFAULT 1"}),
         ):
@@ -103,6 +105,7 @@ def initialize(path):
 
     with closing(sqlite3.connect(path)) as db:
         db.executescript((Path(__file__).resolve().parents[1] / 'cloud/inventory-triggers.sql').read_text(encoding='utf-8'))
+        db.executescript((Path(__file__).resolve().parents[1] / 'cloud/promotion-pricing.sql').read_text(encoding='utf-8').replace('i.price', 'i.item_price'))
 
 
 def menu_list(db, *, all_items=False, public=False):
@@ -118,6 +121,10 @@ def menu_list(db, *, all_items=False, public=False):
             "SELECT id,name,extra_price FROM menu_option WHERE menu_id=? AND active=1 ORDER BY id", (row["id"],)
         )]
     positions = {mid: i for i, mid in enumerate(menu_order_state(db)["ids"])}
+    if public:
+        from .promotions import priced_menu
+        quotes = {r['id']: r for r in db.execute('SELECT * FROM menu_pricing')}
+        rows = [priced_menu(row, quotes[row['id']]) for row in rows]
     return sorted(rows, key=lambda row: (positions.get(row["id"], len(positions)), row["id"]))
 
 
