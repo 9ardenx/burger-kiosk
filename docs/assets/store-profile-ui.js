@@ -1,5 +1,5 @@
-import {escapeText as esc} from './common.js?v=20261128-v112';
-import {suggestStoreName} from './store-naming.js?v=20261128-v112';
+import {escapeText as esc} from './common.js?v=20261128-v113';
+import {suggestStoreName} from './store-naming.js?v=20261128-v113';
 export function addressFields(store={}){return `<div class="address-fields">
  <label>매장 주소<input name="address" value="${esc(store.address??'')}" maxlength="200" placeholder="경기도 용인시 처인구 모현읍 외대로 81" required autocomplete="street-address"></label>
  <label>상세 주소<input name="address_detail" value="${esc(store.address_detail??'')}" maxlength="100" placeholder="층·호수 등"></label>

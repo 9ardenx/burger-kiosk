@@ -5,7 +5,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {handleKiosk} from '../cloud/api.mjs';
 export async function setup(t) {
   const sqlite=new DatabaseSync(':memory:');t.after(()=>sqlite.close());
-  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql','v17-migration.sql','v18-migration.sql','v19-migration.sql','v110-migration.sql','v111-migration.sql','promotion-pricing.sql'])
+  for(const file of ['schema.sql','catalog-migration.sql','choices-migration.sql','v12-migration.sql','admin-cancel-migration.sql','v14-migration.sql','v15-migration.sql','v16-migration.sql','inventory-triggers.sql','v17-migration.sql','v18-migration.sql','v19-migration.sql','v110-migration.sql','v111-migration.sql','v113-migration.sql','notification-triggers.sql','promotion-pricing.sql'])
     sqlite.exec(readFileSync(new URL('../cloud/'+file,import.meta.url),'utf8'));
   const DB={prepare(sql){
     const make=args=>({sql,bind:(...values)=>make(values),

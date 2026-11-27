@@ -1,4 +1,4 @@
-import {escapeText as esc} from './common.js?v=20261128-v112';
+import {escapeText as esc} from './common.js?v=20261128-v113';
 const num=n=>Number(n).toLocaleString('ko-KR');
 export const supplyStatuses={REQUESTED:'발주 요청',APPROVED:'본사 승인',SHIPPED:'출고 완료',PARTIAL:'일부 입고',RECEIVED:'입고 완료',CANCELLED:'점포 취소',REJECTED:'본사 반려'};
 const stamp=s=>new Date(s.replace(' ','T')+'Z').toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});

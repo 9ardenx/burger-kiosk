@@ -1,4 +1,5 @@
 import {franchiseStores} from './franchise.mjs';
+import {notificationConfig,notificationEvents,subscribePush,pushStatus,unsubscribePush,testPush,scheduleNotifications} from './notifications.mjs';
 import {storeProfile,saveStoreProfile} from './store-profile.mjs';
 import {hqSales} from './hq-sales.mjs';
 import {ingredientInventory,adjustIngredient,saveIngredient,requireHQ} from './ingredients.mjs';
@@ -289,12 +290,17 @@ async function saveMenu(db,env,body,id=null) {
   check(saved,'메뉴 분류가 변경되었습니다. 다시 선택해 주세요.',409,'CATEGORIES_CHANGED');return saved;
 }
 
-async function adminRoute(db,env,path,request,body) {
+async function adminRoute(db,env,path,request,body,ctx) {
   if(['/api/admin/login','/api/admin/reset-password'].includes(path)){check(storeId(db)===1&&await legacyEnabled(db),'이메일 계정으로 로그인해 주세요.',401,'ACCOUNT_LOGIN_REQUIRED');}
   if(path==='/api/admin/login'&&body)return loginAdmin(db,env,request,body);
   if(path==='/api/admin/reset-password'&&body)return resetPassword(db,request,body);
   if(path==='/api/admin/claim-account'&&body)return claimAccount(db,env,request,body);
   const actor=await principal(db,env,request),role=await authorizeStore(db,actor);
+  if(path==='/api/admin/notifications/config'&&!body)return notificationConfig(db,env,actor);
+  if(path==='/api/admin/notifications'&&!body){const events=await notificationEvents(db,new URL(request.url).searchParams);await scheduleNotifications(db,env,ctx,storeId(db));return events;}
+  if(path==='/api/admin/notifications/subscribe'&&body)return subscribePush(db,env,actor,body);
+  if(path==='/api/admin/notifications/status'&&body)return pushStatus(db,actor,body);
+  if(path==='/api/admin/notifications/test'&&body)return testPush(db,env,actor,body);
   if(path==='/api/admin/logout'&&body){if(actor.legacy)await statement(db,'DELETE FROM admin_session WHERE digest=?',actor.digest).run();return {ok:true};}
   if(role==='STAFF')check(path==='/api/admin/orders'&&!body||/^\/api\/admin\/orders\/[a-f0-9]{32}$/.test(path)&&body,'점주 권한이 필요한 기능입니다.',403,'ROLE_FORBIDDEN');
   if(path.startsWith('/api/admin/accounts')){
@@ -354,7 +360,7 @@ async function adminRoute(db,env,path,request,body) {
   }
   throw new Problem("경로를 찾을 수 없습니다.",404);
 }
-async function dispatch(request,env,path) {
+async function dispatch(request,env,path,ctx) {
   let db=env.DB;
   check(db,"매장 DB 연결을 확인해 주세요.",503);
   let body;
@@ -369,6 +375,7 @@ async function dispatch(request,env,path) {
   } else check(request.method==="GET","허용하지 않는 요청입니다.",405);
   if(path==='/api/auth/config'&&!body)return accountConfig(db,env);
   if(path==='/api/account'&&!body)return accountInfo(db,await principal(db,env,request));
+  if(path==='/api/account/notifications/unsubscribe'&&body)return unsubscribePush(db,await principal(db,env,request),body);
   if(path==='/api/account/stores'){const actor=await principal(db,env,request);return body?createStore(db,actor,body):franchiseStores(db,actor);}
   if(path==='/api/account/sales'&&!body)return hqSales(db,await principal(db,env,request),new URL(request.url).searchParams);
   if(path.startsWith('/api/account/supply')){
@@ -381,7 +388,7 @@ async function dispatch(request,env,path) {
     if(order)return body?transitionSupply(db,actor,order[1],body,true):supplyOrder(db,order[1],null);
   }
   const store=await resolveStore(db,request);db=storeDb(db,store.id);
-  if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body);
+  if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body,ctx);
   if(path==='/api/ads'&&!body)return adState(db,true);
   if(path==="/api/menu" && !body)return {store,menu:await catalog(db,true,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:"",server_time:(await db.prepare("SELECT unixepoch('now')*1000 AS now").first()).now};
   const token=request.headers.get("X-Kiosk-Session");
@@ -390,11 +397,11 @@ async function dispatch(request,env,path) {
   if(path==="/api/orders" && body)return createOrder(db,customer,body);
   const m=path.match(/^\/api\/orders\/([a-f0-9]{32})(\/attempts|\/cancel)?$/);
   if(m && m[2]==="/cancel" && body)return cancelUnpaid(db,customer,m[1]);
-  if(m && m[2]==="/attempts" && body)return attempt(db,customer,m[1],body);
+  if(m && m[2]==="/attempts" && body){const order=await attempt(db,customer,m[1],body);await scheduleNotifications(db,env,ctx,store.id,true);return order;}
   if(m && !m[2] && !body)return readOrder(db,m[1],customer);
   throw new Problem("경로를 찾을 수 없습니다.",404);
 }
-async function handleKiosk(request,env) {
+async function handleKiosk(request,env,ctx) {
   const origin=request.headers.get("Origin");
   const headers={"Cache-Control":"no-store","Vary":"Origin","Content-Type":"application/json; charset=utf-8"};
   if(origin && origin!==FRONTEND && origin!==new URL(request.url).origin)
@@ -412,7 +419,7 @@ async function handleKiosk(request,env) {
       return new Response(stored.body,{headers:{...headers,"Content-Type":"image/jpeg",
         "Cache-Control":"public, max-age=31536000, immutable","X-Content-Type-Options":"nosniff"}});
     }
-    return Response.json(await dispatch(request,env,path),{headers});
+    return Response.json(await dispatch(request,env,path,ctx),{headers});
   }
   catch(e){
     if((String(e?.message)+' '+String(e?.cause?.message)).includes('PROMOTION_CHANGED'))

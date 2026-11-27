@@ -120,3 +120,13 @@ export const ingredientMovements=sqliteTable('ingredient_movement',{
 export const supplyEvents=sqliteTable('supply_event',{
  id:integer().primaryKey({autoIncrement:true}),order_id:text().notNull().references(()=>supplyOrders.id),status:text().notNull(),actor:text().notNull(),note:text().notNull().default(''),created_at:text().notNull().default(sql`CURRENT_TIMESTAMP`)
 });
+
+export const orderNotifications=sqliteTable('order_notification',{
+ id:integer().primaryKey({autoIncrement:true}),store_id:integer().notNull().references(()=>stores.id),order_id:text().notNull().references(()=>orders.id),created_at:integer().notNull().default(sql`(unixepoch()*1000)`)
+},t=>[uniqueIndex('notification_one_order').on(t.order_id),index('notification_store_cursor').on(t.store_id,t.id)]);
+export const pushSubscriptions=sqliteTable('push_subscription',{
+ id:text().primaryKey(),uid:text().notNull().references(()=>staffAccounts.uid),store_id:integer().notNull().references(()=>stores.id),endpoint:text().notNull(),p256dh:text().notNull(),auth:text().notNull(),generation:text().notNull(),enabled:integer().notNull().default(1),expires:integer().notNull(),last_test:integer().notNull().default(0)
+},t=>[index('push_store_user').on(t.store_id,t.uid,t.enabled)]);
+export const notificationDeliveries=sqliteTable('notification_delivery',{
+ event_id:integer().notNull().references(()=>orderNotifications.id),subscription_id:text().notNull().references(()=>pushSubscriptions.id),generation:text().notNull(),status:text().notNull().default('PENDING'),attempts:integer().notNull().default(0),next_attempt:integer().notNull().default(0),lease:text(),last_result:text()
+},t=>[primaryKey({columns:[t.event_id,t.subscription_id]}),index('delivery_pending').on(t.status,t.next_attempt)]);

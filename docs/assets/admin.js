@@ -1,22 +1,23 @@
-import {franchiseView} from './franchise-ui.js?v=20261128-v112';
-import {workspaceRoute,workspaceTabs,parentTab,directStores} from './workspace.js?v=20261128-v112';
-import {workspaceBar,hqHomeView,hqAccountsView,hqStoreContext} from './workspace-ui.js?v=20261128-v112';
-import {profileView,updateNamePreview} from './store-profile-ui.js?v=20261128-v112';
-import {hqSalesView} from './hq-sales-ui.js?v=20261128-v112';
-import {materialView,storeSupplyView,hqSupplyView} from './supply-ui.js?v=20261128-v112';
-import {configureAccountAuth,rememberAccount,clearAccount,signInEmail,registerEmail,sendVerification,sendPasswordReset} from './account-client.js?v=20261128-v112';
-import {accountLoginView,accountSettingsView,storeBar} from './accounts-ui.js?v=20261128-v112';
-import {getStoreId,selectStore} from './backend.js?v=20261128-v112';
-import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261128-v112';
-import {handleVariantButton} from "./group-editor.js?v=20261128-v112";
-import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261128-v112";
-import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261128-v112";
-import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261128-v112";
-import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261128-v112';
-import {adList,adEditor} from './advertising-ui.js?v=20261128-v112';
-import {diningName} from './welcome.js?v=20261128-v112';
-import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261128-v112';
-import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261128-v112";
+import {franchiseView} from './franchise-ui.js?v=20261128-v113';
+import {startNotifications,stopNotifications,logoutNotifications,notificationControls,notificationClick,clearOrderAlert} from './notifications.js?v=20261128-v113';
+import {workspaceRoute,workspaceTabs,parentTab,directStores} from './workspace.js?v=20261128-v113';
+import {workspaceBar,hqHomeView,hqAccountsView,hqStoreContext} from './workspace-ui.js?v=20261128-v113';
+import {profileView,updateNamePreview} from './store-profile-ui.js?v=20261128-v113';
+import {hqSalesView} from './hq-sales-ui.js?v=20261128-v113';
+import {materialView,storeSupplyView,hqSupplyView} from './supply-ui.js?v=20261128-v113';
+import {configureAccountAuth,rememberAccount,clearAccount,signInEmail,registerEmail,sendVerification,sendPasswordReset} from './account-client.js?v=20261128-v113';
+import {accountLoginView,accountSettingsView,storeBar} from './accounts-ui.js?v=20261128-v113';
+import {getStoreId,selectStore,beginLogout} from './backend.js?v=20261128-v113';
+import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261128-v113';
+import {handleVariantButton} from "./group-editor.js?v=20261128-v113";
+import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261128-v113";
+import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261128-v113";
+import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261128-v113";
+import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261128-v113';
+import {adList,adEditor} from './advertising-ui.js?v=20261128-v113';
+import {diningName} from './welcome.js?v=20261128-v113';
+import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261128-v113';
+import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261128-v113";
 
 const tabs=document.querySelector('#tabs');
 let authSettings={enabled:false,legacy_enabled:true},identity=null,memberRecords={members:[],invitations:[]},franchises={stores:[]};
@@ -68,6 +69,7 @@ async function refreshPhotoPreview(form) {
 }
 function closeEditor(){promotionEdit=null;resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;inventoryEdit=null;materialEdit=null;ingredientEdit=null;supplyDetail=null;}
 function login(recovery=false,legacy=false) {
+  stopNotifications();
   identity=null;
   freshLogin=true;
   document.title='관리자 로그인 · 버거 키오스크';
@@ -142,7 +144,7 @@ function render() {
   const title=workspace==='hq'?'본사 관리':isStaff()?'직원 주문 관리':'매장 운영';
   document.title=title+' · 버거 키오스크';
   const brand=document.querySelector('.brand');brand.lastChild.textContent=title;
-  const brandUrl=new URL('admin.html',location.href);brandUrl.searchParams.set('v','20261128-v112');if(workspace==='store'){brandUrl.searchParams.set('workspace','store');brandUrl.searchParams.set('store',String(getStoreId()));}brand.href=brandUrl.href;
+  const brandUrl=new URL('admin.html',location.href);brandUrl.searchParams.set('v','20261128-v113');if(workspace==='store'){brandUrl.searchParams.set('workspace','store');brandUrl.searchParams.set('store',String(getStoreId()));}brand.href=brandUrl.href;
   document.querySelector('.header-link').hidden=workspace==='hq';
   tabs.innerHTML=Object.entries(workspaceTabs(identity??{legacy:true},workspace)).filter(([id])=>(authSettings.enabled||!['accounts','storeinfo'].includes(id))&&(!isStaff()||id==='orders')).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${(workspace==='hq'?parentTab(current):current)===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
   app.innerHTML=current==='hqsales'?hqSalesView(hqReport,hqPeriod,hqStores):current==='storeinfo'?profileView(storeDetails,identity?.platform_role==='HQ'):current==='franchise'?franchiseView(franchises):current==='accounts'?accountSettingsView(identity,memberRecords,getStoreId()):current==='promotions'?promotionView(promotions,menu,promotionEdit):current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
@@ -152,6 +154,7 @@ function render() {
   if(current==='hqhome')app.innerHTML=hqHomeView(identity,franchises);
   if(current==='hqaccounts')app.innerHTML=hqAccountsView(identity,franchises);
   if(identity){
+    if(workspace==='store')app.insertAdjacentHTML('afterbegin',notificationControls());
     if(workspace==='store')app.insertAdjacentHTML('afterbegin',storeBar(identity,getStoreId()));
     else if(['accounts','storeinfo'].includes(current))app.insertAdjacentHTML('afterbegin',hqStoreContext(identity,getStoreId(),current));
     app.insertAdjacentHTML('afterbegin',workspaceBar(identity,workspace,getStoreId(),current));
@@ -167,9 +170,12 @@ async function refresh() {
     if(!identity.stores.length&&identity.platform_role!=='HQ'){login();throw new Error('연결된 매장이 없습니다. 점주에게 계정 등록을 요청해 주세요.');}
   }
   if(identity){
-    const route=workspaceRoute(identity,{workspace,tab:current,storeId:getStoreId(),freshLogin});freshLogin=false;workspace=route.workspace;current=route.tab;
+    const notificationLink=/^\d+$/.test(new URL(location.href).searchParams.get('notification')??'')&&identity.stores.some(s=>s.id===getStoreId());
+    if(freshLogin&&notificationLink){workspace='store';current='orders';}
+    const route=workspaceRoute(identity,{workspace,tab:current,storeId:getStoreId(),freshLogin:freshLogin&&!notificationLink});freshLogin=false;workspace=route.workspace;current=route.tab;
     if(route.storeId!==null&&route.storeId!==getStoreId()&&(workspace==='store'||['accounts','storeinfo'].includes(current))){selectStore(route.storeId,current,workspace);return;}
     const url=new URL(location.href);url.searchParams.set('workspace',workspace);url.hash=current;history.replaceState(null,'',url);
+    startNotifications({account:identity,store:getStoreId(),active:workspace==='store',onOrders:()=>{if(current==='orders'&&!busy)void refreshOrders().catch(error=>notice(error.message));},onAuthError:()=>{login();notice('계정 또는 매장 권한을 다시 확인해 주세요.');}});
   }
   if(['hqhome','hqaccounts','franchise'].includes(current)){franchises=await api('/api/account/stores');render();return;}
   if(current==='materials'){materials=await api('/api/admin/ingredients');render();return;}
@@ -342,6 +348,8 @@ document.addEventListener("submit",event=>{
 document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(b&&!busy){
+    if(notificationClick(b))return;
+    if(b.hasAttribute('data-alert-orders')){if(allowWorkspaceNavigation())act(async()=>{closeEditor();clearOrderAlert();current='orders';await refresh();});return;}
     if(b.hasAttribute('data-workspace-hq')){if(allowWorkspaceNavigation())act(async()=>{closeEditor();workspace='hq';current='hqhome';await refresh();});return;}
     if(b.hasAttribute('data-workspace-store')){
       const stores=directStores(identity);if(!stores.length||!allowWorkspaceNavigation())return;
@@ -451,7 +459,7 @@ if(busy)return;
   if(current==='inventory'&&inventoryEdit&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 재고 입력을 버리고 이동할까요?'))return;
   act(async()=>{
     if(b.dataset.tab){closeEditor();current=b.dataset.tab;await refresh();}
-    else if(b.dataset.act==="logout"){await api("/api/admin/logout",{});login();}
+    else if(b.dataset.act==="logout"){const token=beginLogout();const cleanup=logoutNotifications(token);const url=new URL(location.href);url.searchParams.delete('notification');history.replaceState(null,'',url);login();void Promise.allSettled([cleanup,api('/api/admin/logout',{},token)]);}
   });
 });
 act(async()=>{

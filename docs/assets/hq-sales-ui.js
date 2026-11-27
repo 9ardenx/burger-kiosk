@@ -1,5 +1,5 @@
-import {escapeText as esc,money} from './common.js?v=20261128-v112';
-import {chart} from './insights-ui.js?v=20261128-v112';
+import {escapeText as esc,money} from './common.js?v=20261128-v113';
+import {chart} from './insights-ui.js?v=20261128-v113';
 const count=n=>Number(n).toLocaleString('ko-KR');
 export function hqSalesView(data,period,stores){
  const s=data.summary;

@@ -1,0 +1,6 @@
+{
+  "name": "burger-kiosk-cloud",
+  "private": true,
+  "type": "module",
+  "dependencies": {"@block65/webcrypto-web-push": "2.0.0"}
+}

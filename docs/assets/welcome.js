@@ -1,6 +1,6 @@
-import {escapeText,money} from './common.js?v=20261128-v112';
-import {adPhotoUrl} from './backend.js?v=20261128-v112';
-import {menuPicture} from './catalog.js?v=20261128-v112';
+import {escapeText,money} from './common.js?v=20261128-v113';
+import {adPhotoUrl} from './backend.js?v=20261128-v113';
+import {menuPicture} from './catalog.js?v=20261128-v113';
 export const diningName=value=>value==='DINE_IN'?'매장':value==='TAKEOUT'?'포장':'이용 방식 미기록';
 const eatIcon='<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M8 5v12m6-12v12m6-12v12M8 14v3a6 6 0 0 0 12 0v-3m-6 9v20m24 0V5c-8 4-10 15-8 21h8"/></svg>';
 const bagIcon='<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M10 15h28l3 28H7l3-28Zm7 0v-4a7 7 0 0 1 14 0v4m-14 5v-5m14 5v-5"/></svg>';

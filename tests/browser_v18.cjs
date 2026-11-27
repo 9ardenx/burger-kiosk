@@ -6,6 +6,7 @@ async function main(){
  const {tenantFixture}=await import('./tenant-fixture.mjs'),{handleKiosk}=await import('../cloud/api.mjs');
  let cleanup;const f=await tenantFixture({after(fn){cleanup=fn;}}),root=path.resolve(__dirname,'..');
  const users=new Map([['a@example.test',f.a],['b@example.test',f.b],['staff@example.test',f.staff],['primary@example.test',f.identity('primary','primary@example.test')]]),mail=[],errors=[];
+ const push=process.env.KIOSK_TEST_NOTIFICATIONS==='1'?(await import('./push-fixture.mjs')).pushFixture(f):null;
  let base,phase='old';const requests=[];
  const server=http.createServer(async(req,res)=>{
   try{
@@ -14,7 +15,7 @@ async function main(){
    const file=url.pathname==='/'?'index.html':url.pathname.slice(1);
    let content;if(phase==='old'&&/\.(js|css|html)$/.test(file)){try{content=require('node:child_process').execFileSync('git',['show',cacheTag+':docs/'+file],{encoding:'utf8',windowsHide:true,stdio:['ignore','pipe','ignore']});}catch{content=fs.readFileSync(path.join(root,'docs',file));}}else content=fs.readFileSync(path.join(root,'docs',file));
    if(file==='assets/backend.js')content=content.toString().replace('https://burger-kiosk-9ardenx-api.epicowl12.chatgpt.site',base);
-   res.setHeader('Cache-Control','public,max-age=600');res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.svg')?'image/svg+xml':'text/html');res.end(content);
+   res.setHeader('Cache-Control','public,max-age=600');res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.svg')?'image/svg+xml':file.endsWith('.png')?'image/png':file.endsWith('.webmanifest')?'application/manifest+json':'text/html');res.end(content);
   }catch(e){res.writeHead(404).end();}
  });
  await new Promise(r=>server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+server.address().port;
@@ -39,7 +40,7 @@ async function main(){
   const login=async email=>{await p.locator('#email-login [name=email]').fill(email);await p.locator('#email-login [name=password]').fill(testPassword);await p.locator('#email-login button').click();};
   await login('new@example.test');await p.getByText('이메일 인증 후 다시 로그인해 주세요.',{exact:true}).waitFor();await p.reload();await p.locator('#email-login').waitFor();
   await p.getByRole('button',{name:'기존 관리자 암호로 로그인'}).click();await p.locator('#login [name=password]').fill(f.password);await p.locator('#login button').click();await p.locator('[data-tab=accounts]').click();await p.locator('#claim-account [name=email]').fill('primary@example.test');await p.locator('#claim-account [name=password]').fill(testPassword);await p.locator('#claim-account button.primary').click();await p.getByText('기존 매장을 이메일 계정에 연결했습니다.',{exact:false}).waitFor();assert.equal(f.sqlite.prepare('SELECT legacy_disabled FROM account_policy').get().legacy_disabled,1);
-  const openFranchise=async()=>{if(await p.locator('#tabs [data-tab=hqhome]').count())await p.locator('#tabs [data-tab=franchise]').click();};
+  const openFranchise=async()=>{if(await p.locator('#tabs [data-tab=hqhome]').count()){await p.locator('#tabs [data-tab=franchise]').click();await p.locator('#create-store').waitFor();}};
   if(process.env.KIOSK_TEST_WORKSPACE==='1')await require('./workspace-browser-flow.cjs')({p,f,login,out});
   if(process.env.KIOSK_TEST_FRANCHISE==='1'){
    await p.getByRole('heading',{name:'본사 관리',exact:true}).waitFor();
@@ -71,7 +72,8 @@ async function main(){
   await login('staff@example.test');await p.locator('#account-store').waitFor();assert.deepEqual(await p.locator('#tabs [data-tab]').evaluateAll(bs=>bs.map(b=>b.dataset.tab)),['orders']);await p.locator('[data-next]').waitFor();assert.equal(await p.locator('[data-cancel-order]').count(),0,'staff must not see an unauthorized cancellation action');await p.locator('[data-next]').click();await p.getByRole('button',{name:'준비 완료',exact:true}).waitFor();await p.locator('[data-act=logout]').click();
   // Store mismatch redirects to the account's own store. Expired browser token refreshes.
   await login('a@example.test');await p.waitForURL('**store=1*');await p.locator('#account-store').waitFor();await p.evaluate(()=>{const k='burger-kiosk.account.v18',s=JSON.parse(sessionStorage.getItem(k));s.expiresAt=0;sessionStorage.setItem(k,JSON.stringify(s));});await p.reload();await p.locator('#account-store').waitFor();
+  if(push)await require('./notification-browser-flow.cjs')({p,f,login,push,out,context,base});
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'browser-results.json'),JSON.stringify({date:new Date().toISOString(),cacheUpgrade:true,cacheTag,franchiseOnboarding:process.env.KIOSK_TEST_FRANCHISE==='1',passwordMinimum6:true,shortPasswordRejectedBeforeProvider:true,signupVerification:true,passwordResetRequest:true,unverifiedReload:true,ownerClaim:true,storeSwitch:true,memberInviteRevoke:true,staffTabs:true,tokenRefresh:true,widths:[320,390,768,1280],errors,provider:'mock; no real mail sent'},null,2));console.log('PASS accounts browser (5 rejected, 6 accepted): cached upgrade, signup, recovery, claim, tenants, roles, refresh, four widths');
- }finally{await browser.close();await new Promise(r=>server.close(r));cleanup();}
+ }catch(error){const debug=browser.contexts()[0]?.pages()[0];if(debug){await debug.screenshot({path:path.join(out,'failure.png'),fullPage:true}).catch(()=>{});console.error(await debug.evaluate(()=>({url:location.href,text:document.body.innerText,buttons:[...document.querySelectorAll('#tabs button')].map(b=>({text:b.textContent,disabled:b.disabled}))})).catch(()=>null));}throw error;}finally{await browser.close();await new Promise(r=>server.close(r));cleanup();}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,5 +1,5 @@
-import {escapeText as esc} from './common.js?v=20261128-v112';
-import {directStores} from './workspace.js?v=20261128-v112';
+import {escapeText as esc} from './common.js?v=20261128-v113';
+import {directStores} from './workspace.js?v=20261128-v113';
 export function workspaceBar(account,workspace,current,tab){
  if(workspace==='hq')return `<section class="workspace-banner" aria-label="현재 작업 공간"><div><span class="workspace-label">본사</span><strong>프랜차이즈 통합 관리</strong><small>${esc(account.email)}</small></div>${directStores(account).length?'<button class="secondary" data-workspace-store>직영점 운영으로 전환</button>':''}</section>`;
  const store=account.stores.find(s=>s.id===current),hq=account.platform_role==='HQ';
