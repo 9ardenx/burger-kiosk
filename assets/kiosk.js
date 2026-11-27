@@ -1,11 +1,12 @@
-import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261127-v173';
-import {evaluateGroups} from "./choice-rules.js?v=20261127-v173";
-import {labels, menuPicture, setCategories} from "./catalog.js?v=20261127-v173";
-import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261127-v173";
-import {welcomeView,heroView,diningName} from './welcome.js?v=20261127-v173';
-import {buildAdSlides} from './ad-slides.js?v=20261127-v173';
+import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261127-v18';
+import {evaluateGroups} from "./choice-rules.js?v=20261127-v18";
+import {labels, menuPicture, setCategories} from "./catalog.js?v=20261127-v18";
+import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261127-v18";
+import {welcomeView,heroView,diningName} from './welcome.js?v=20261127-v18';
+import {buildAdSlides} from './ad-slides.js?v=20261127-v18';
 
-const storageKey = "burger-kiosk-session-v1";
+const requestedStore=new URL(location.href).searchParams.get('store')??'1';
+const storageKey = 'burger-kiosk-session-v1'+(requestedStore==='1'?'':'.'+requestedStore);
 const defaults = () => ({cart: [], page: "welcome", diningType:null, checkoutKey: null, orderId: null, attemptKey: null, callback: null});
 let state;
 try { state = {...defaults(), ...JSON.parse(sessionStorage.getItem(storageKey))}; }
@@ -73,6 +74,7 @@ async function loadMenu() {
   setPriceClock(catalog.server_time);
   menu = catalog.menu; mode = catalog.mode; clientKey = catalog.clientKey;
   updateAdSlides();
+  if(catalog.store)document.querySelector('.brand span')?.replaceChildren(document.createTextNode(catalog.store.name));
   setCategories(catalog.categories);if(categoryFilter!=='all'&&!Object.hasOwn(labels,categoryFilter))categoryFilter='all';
 }
 function syncPrices() {
