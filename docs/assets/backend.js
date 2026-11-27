@@ -1,4 +1,4 @@
-import {accountToken,clearAccount} from './account-client.js?v=20261128-v114';
+import {accountToken,clearAccount} from './account-client.js?v=20261128-v115';
 const API_ORIGIN = "https://burger-kiosk-9ardenx-api.epicowl12.chatgpt.site";
 const keyPrefix = "burger-kiosk.cloud.v1.";
 export function getStoreId(){const value=new URL(location.href).searchParams.get('store')??'1';return /^[1-9]\d{0,8}$/.test(value)?Number(value):1;}

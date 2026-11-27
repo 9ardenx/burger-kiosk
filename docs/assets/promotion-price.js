@@ -1,4 +1,4 @@
-import {escapeText as esc,money} from './common.js?v=20261128-v114';
+import {escapeText as esc,money} from './common.js?v=20261128-v115';
 let offset=0;
 export function setPriceClock(serverTime){if(Number.isFinite(serverTime))offset=serverTime-Date.now();}
 export function priceHtml(item){return item.promotion?`<span class="sale-price"><del>${money(item.original_price)}</del><b>${money(item.base_price)}</b></span>`:`<b>${money(item.base_price)}</b>`;}

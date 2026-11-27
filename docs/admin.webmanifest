@@ -2,7 +2,7 @@
   "id": "./admin.html",
   "name": "버거 키오스크 매장 관리",
   "short_name": "매장 관리",
-  "start_url": "./admin.html?v=20261128-v114",
+  "start_url": "./admin.html?v=20261128-v115",
   "scope": "./",
   "display": "standalone",
   "lang": "ko",

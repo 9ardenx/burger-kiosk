@@ -1,4 +1,5 @@
 import {franchiseStores} from './franchise.mjs';
+import {paymentConfig,beginToss,resolveToss} from './toss-payments.mjs';
 import {notificationConfig,notificationEvents,subscribePush,pushStatus,unsubscribePush,testPush,scheduleNotifications} from './notifications.mjs';
 import {storeProfile,saveStoreProfile} from './store-profile.mjs';
 import {hqSales} from './hq-sales.mjs';
@@ -68,7 +69,11 @@ const orderSelect = `SELECT o.id,o.number,CASE WHEN o.cancelled_at IS NOT NULL T
   (SELECT json_group_array(json_object('name',i.name,'quantity',i.quantity,'price',i.price,'regular_price',i.regular_price,'promotion',json(i.promotion),'variants',json(i.choice_snapshot),
     'options',json((SELECT json_group_array(json_object('name',x.name,'option_price',x.option_price))
       FROM order_item_option x WHERE x.item_id=i.id)))) FROM order_item i WHERE i.order_id=o.id) AS items,
-  (SELECT json_object('id',p.id,'status',p.status,'mode',p.mode) FROM payment p
+  (SELECT CASE WHEN p.mode='toss_test' THEN json_object('id',p.id,'status',p.status,'mode',p.mode,
+    'has_key',EXISTS(SELECT 1 FROM toss_checkout t WHERE t.payment_id=p.id AND t.payment_key IS NOT NULL),
+    'needs_reconcile',EXISTS(SELECT 1 FROM toss_checkout t WHERE t.payment_id=p.id AND (t.confirm_started=1 OR t.cancel_requested=1)),
+    'notice',(SELECT last_error FROM toss_checkout t WHERE t.payment_id=p.id))
+    ELSE json_object('id',p.id,'status',p.status,'mode',p.mode) END FROM payment p
      WHERE p.order_id=o.id ORDER BY p.rowid DESC LIMIT 1) AS payment FROM orders o`;
 function toView(row) {
   return {...row,items:JSON.parse(row.items).map(({variants,options,...item})=>({...item,options:[...variants,...options]})),payment:row.payment?JSON.parse(row.payment):null};
@@ -120,8 +125,8 @@ async function createOrder(db,customer,body) {
   const created="EXISTS(SELECT 1 FROM orders WHERE id=? AND creation_tag=?)";
   for(const line of lines){
     const itemId=crypto.randomUUID();
-    commands.push(statement(db,`INSERT INTO order_item(id,order_id,menu_id,name,quantity,price,choice_snapshot,regular_price,promotion)
-      SELECT ?,?,?,?,?,?,?,?,? WHERE ${created}`,itemId,id,line.menu.id,line.menu.name,line.quantity,line.menu.base_price,JSON.stringify(line.snapshot),line.menu.original_price,line.menu.promotion?JSON.stringify(line.menu.promotion):null,id,tag));
+    commands.push(statement(db,`INSERT INTO order_item(id,order_id,menu_id,name,quantity,price,choice_snapshot,regular_price,promotion,menu_version)
+      SELECT ?,?,?,?,?,?,?,?,?,? WHERE ${created}`,itemId,id,line.menu.id,line.menu.name,line.quantity,line.menu.base_price,JSON.stringify(line.snapshot),line.menu.original_price,line.menu.promotion?JSON.stringify(line.menu.promotion):null,line.menu.version,id,tag));
     for(const opt of line.options) commands.push(statement(db,`INSERT INTO order_item_option(id,item_id,option_id,name,option_price)
       SELECT ?,?,?,?,? WHERE ${created}`,crypto.randomUUID(),itemId,opt.id,opt.name,opt.extra_price,id,tag));
   }
@@ -390,14 +395,26 @@ async function dispatch(request,env,path,ctx) {
   const store=await resolveStore(db,request);db=storeDb(db,store.id);
   if(path.startsWith("/api/admin/"))return adminRoute(db,env,path,request,body,ctx);
   if(path==='/api/ads'&&!body)return adState(db,true);
-  if(path==="/api/menu" && !body)return {store,menu:await catalog(db,true,true),categories:(await categoryState(db)).items,mode:"demo",clientKey:"",server_time:(await db.prepare("SELECT unixepoch('now')*1000 AS now").first()).now};
+  if(path==="/api/menu" && !body)return {store,menu:await catalog(db,true,true),categories:(await categoryState(db)).items,...paymentConfig(env),server_time:(await db.prepare("SELECT unixepoch('now')*1000 AS now").first()).now};
   const token=request.headers.get("X-Kiosk-Session");
   check(validKey(token),"고객 세션을 확인해 주세요.",401);
   const customer=await digest(token);
   if(path==="/api/orders" && body)return createOrder(db,customer,body);
   const m=path.match(/^\/api\/orders\/([a-f0-9]{32})(\/attempts|\/cancel)?$/);
   if(m && m[2]==="/cancel" && body)return cancelUnpaid(db,customer,m[1]);
-  if(m && m[2]==="/attempts" && body){const order=await attempt(db,customer,m[1],body);await scheduleNotifications(db,env,ctx,store.id,true);return order;}
+  if(m && m[2]==="/attempts" && body){
+    const previous=await readOrder(db,m[1],customer);
+    check(previous.status!=='CANCELLED','취소한 주문입니다. 메뉴를 다시 선택해 주세요.',409,'ORDER_CANCELLED');
+    if(previous.payment?.status==='PENDING'||previous.number!==null)return previous;
+    if(paymentConfig(env).mode!=='demo'){
+      check(validKey(body.key),'결제 요청을 확인해 주세요.');
+      check(body.checkout_version==='v115','결제 화면이 업데이트되었습니다. 새로고침 후 다시 시도해 주세요.',409,'CLIENT_UPDATE_REQUIRED');
+      await beginToss(db,env,customer,m[1],(await digest(m[1]+'/'+body.key)).slice(0,32));return readOrder(db,m[1],customer);
+    }
+    const order=await attempt(db,customer,m[1],body);await scheduleNotifications(db,env,ctx,store.id,true);return order;
+  }
+  const payment=path.match(/^\/api\/payments\/([a-f0-9]{32})$/);
+  if(payment&&body){const id=await resolveToss(db,env,customer,payment[1],body);await scheduleNotifications(db,env,ctx,store.id,true);return readOrder(db,id,customer);}
   if(m && !m[2] && !body)return readOrder(db,m[1],customer);
   throw new Problem("경로를 찾을 수 없습니다.",404);
 }

@@ -1,5 +1,5 @@
-import {escapeText as esc,money} from './common.js?v=20261128-v114';
-import {diningName} from './welcome.js?v=20261128-v114';
+import {escapeText as esc,money} from './common.js?v=20261128-v115';
+import {diningName} from './welcome.js?v=20261128-v115';
 
 export function periodPreset(days=7) {
   const now=Date.now()+9*3600000,to=new Date(now).toISOString().slice(0,10);
@@ -24,7 +24,7 @@ export function chart(days) {
 
 export function salesView(data,period) {
   const s=data.summary;
-  return `<div class="heading split"><div><p class="eyebrow">매장 운영</p><h1>매출 분석</h1><p>얼마나 팔렸는지, 어떤 메뉴를 많이 찾는지 확인하세요.</p></div><span class="mode-tag">모의 결제 기준</span></div>
+  return `<div class="heading split"><div><p class="eyebrow">매장 운영</p><h1>매출 분석</h1><p>얼마나 팔렸는지, 어떤 메뉴를 많이 찾는지 확인하세요.</p></div><span class="mode-tag">테스트 결제 기준</span></div>
     <section class="panel report-controls"><div class="period-presets" aria-label="빠른 기간 선택"><button class="secondary" data-sales-days="1">오늘</button><button class="secondary" data-sales-days="7">최근 7일</button><button class="secondary" data-sales-days="30">최근 30일</button></div>
     <form id="sales-period"><label>시작일<input name="from" type="date" value="${esc(period.from)}" required></label><label>종료일<input name="to" type="date" value="${esc(period.to)}" required></label><button class="primary">조회</button></form></section>
     <p class="report-caption">${esc(data.from)} ~ ${esc(data.to)} · 한국 시간 · 승인일 / 취소일 기준</p>

@@ -24,7 +24,7 @@ export const items = sqliteTable("order_item", {
   menu_id: integer().notNull().references(() => menus.id), name: text().notNull(),
   choice_snapshot: text().notNull().default("[]"),
   quantity: integer().notNull(), price: integer().notNull()
-  ,regular_price: integer(), promotion: text()
+    ,regular_price: integer(), promotion: text(), menu_version: integer()
 }, t => [index("items_by_order").on(t.order_id)]);
 export const choices = sqliteTable("order_item_option", {
   id: text().primaryKey(), item_id: text().notNull().references(() => items.id),
@@ -35,7 +35,10 @@ export const payments = sqliteTable("payment", {
   id: text().primaryKey(), order_id: text().notNull().references(() => orders.id),
   status: text().notNull(), amount: integer().notNull(), mode: text().notNull().default("demo"),
   created_at: text().notNull().default(sql`CURRENT_TIMESTAMP`)
-}, t => [index("payments_by_order").on(t.order_id), uniqueIndex("one_success").on(t.order_id).where(sql`status = 'SUCCESS'`)]);
+}, t => [index("payments_by_order").on(t.order_id), uniqueIndex("one_success").on(t.order_id).where(sql`status = 'SUCCESS'`),uniqueIndex('one_active_payment').on(t.order_id).where(sql`status IN ('PENDING','SUCCESS')`)]);
+export const tossCheckouts=sqliteTable('toss_checkout',{
+ payment_id:text().primaryKey().references(()=>payments.id),payment_key:text(),phase:text().notNull().default('OPEN'),confirm_started:integer().notNull().default(0),cancel_requested:integer().notNull().default(0),lease_owner:text(),lease_until:integer().notNull().default(0),last_error:text().notNull().default(''),updated_at:integer().notNull().default(0)
+},t=>[uniqueIndex('toss_payment_key_unique').on(t.payment_key)]);
 export const sessions = sqliteTable("admin_session", {
   digest: text().primaryKey(), expires: integer().notNull(), auth_revision: integer().notNull().default(0)
 });

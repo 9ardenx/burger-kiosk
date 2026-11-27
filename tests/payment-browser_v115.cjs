@@ -1,0 +1,24 @@
+const {chromium}=require('playwright'),http=require('node:http'),fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+async function main(){
+ const out='data/qa/v1.15',errors=[];let cleanup,base;
+ const {tenantFixture}=await import('./tenant-fixture.mjs'),{tossFixture}=await import('./toss-fixture.mjs'),{handleKiosk}=await import('../cloud/api.mjs');
+ const f=await tenantFixture({after(fn){cleanup=fn;}}),pg=tossFixture(f);
+ const server=http.createServer(async(req,res)=>{try{const u=new URL(req.url,base);if(u.pathname.startsWith('/api/')){let chunks=[];for await(const b of req)chunks.push(b);const r=await handleKiosk(new Request(u,{method:req.method,headers:req.headers,...(req.method==='GET'?{}:{body:Buffer.concat(chunks)})}),f.env);res.writeHead(r.status,Object.fromEntries(r.headers));return res.end(Buffer.from(await r.arrayBuffer()));}const file=u.pathname==='/'?'index.html':u.pathname.slice(1);let content=fs.readFileSync(path.join('docs',file));if(file==='assets/backend.js')content=content.toString().replace('https://burger-kiosk-9ardenx-api.epicowl12.chatgpt.site',base);res.setHeader('Content-Type',file.endsWith('.js')?'text/javascript':file.endsWith('.css')?'text/css':file.endsWith('.svg')?'image/svg+xml':'text/html');res.end(content);}catch{res.writeHead(404).end();}});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));base='http://127.0.0.1:'+server.address().port;
+ const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe'});
+ try{
+  const context=await browser.newContext(),p=await context.newPage();p.setDefaultTimeout(8000);p.on('pageerror',e=>errors.push(e.message));
+  await context.route('https://js.tosspayments.com/v2/standard',r=>r.fulfill({contentType:'text/javascript',body:`window.TossPayments=key=>({payment:()=>({requestPayment:async options=>{window.qaPayment=options;}})});window.TossPayments.ANONYMOUS='ANONYMOUS';`}));
+  const checkout=async(store=2)=>{await p.goto(base+'/?store='+store);await p.locator('[data-dining=TAKEOUT]').click();await p.locator('.menu-card').first().click();await p.locator('#option-form [type=submit]').click();await p.locator('[data-action=review]').click();await p.getByText('토스 테스트 결제 · 실제 출금 없음',{exact:true}).waitFor();await p.locator('[data-action=pay]').click();await p.waitForFunction(()=>!!window.qaPayment);return p.evaluate(()=>window.qaPayment);};
+  const first=await checkout();assert.equal(first.method,'CARD');assert.equal(first.amount.value,7000);assert.equal(new URL(first.successUrl).pathname,'/payment-return.html');assert.equal(new URL(first.successUrl).searchParams.get('store'),'2');
+  await p.goto(first.failUrl+'&code=PAY_PROCESS_CANCELED');await p.locator('[data-action=retry]').waitFor();assert.ok(!p.url().includes('attempt='));await p.locator('[data-action=retry]').click();await p.waitForFunction(old=>window.qaPayment?.orderId!==old,first.orderId);
+  const second=await p.evaluate(()=>window.qaPayment),url=new URL(second.successUrl);url.searchParams.set('orderId',second.orderId);url.searchParams.set('amount',second.amount.value);url.searchParams.set('paymentKey','browser-test-'+second.orderId);
+  await p.goto(url.href);await p.getByRole('heading',{name:'주문이 접수되었습니다'}).waitFor();assert.ok(!p.url().includes('paymentKey'));assert.equal(f.sqlite.prepare("SELECT count(*) n FROM orders WHERE status='PAID' AND store_id=2").get().n,1);assert.equal(f.sqlite.prepare("SELECT count(*) n FROM orders WHERE status='PAID' AND store_id=1").get().n,0);
+  for(const width of [320,390,768,1280]){await p.setViewportSize({width,height:1000});assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await p.screenshot({path:path.join(out,'payment-receipt-'+width+'.png'),fullPage:true});}
+  await p.reload();await p.getByRole('heading',{name:'주문이 접수되었습니다'}).waitFor();assert.equal(pg.calls.filter(c=>c.route==='confirm').length,1);
+  await p.goto(url.href);await p.getByRole('heading',{name:'주문이 접수되었습니다'}).waitFor();assert.equal(pg.calls.filter(c=>c.route==='confirm').length,1);
+  await p.locator('[data-action=reset]').click();await p.locator('[data-dining=TAKEOUT]').waitFor();await p.goto(url.href);await p.getByText('결제를 시작한 브라우저와 매장에서 결과를 다시 확인해 주세요.',{exact:true}).waitFor();assert.ok(!p.url().includes('paymentKey'));
+  assert.deepEqual(errors,[]);const result={date:new Date().toISOString(),sdk:'mock',provider:'mock',cancelRetry:true,staticCallback:true,storeSessionScope:true,duplicateCallbackOneApproval:true,refreshReceipt:true,missingSessionBlocked:true,widths:[320,390,768,1280],errors};fs.writeFileSync(path.join(out,'payment-browser-results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+ }finally{await browser.close();await new Promise(r=>server.close(r));cleanup();}
+}
+main().catch(e=>{console.error(e);process.exitCode=1;});

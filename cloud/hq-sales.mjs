@@ -9,9 +9,9 @@ export async function hqSales(db,actor,params){
  const scope=id===null?'':' AND o.store_id=?',args=[range.start,range.end,...(id===null?[]:[id])];
  const events=`WITH events AS (
  SELECT o.id,o.store_id,o.total,p.created_at AS stamp,1 AS direction FROM orders o JOIN payment p ON p.order_id=o.id AND p.status='SUCCESS'
- WHERE p.mode='demo' AND p.created_at>=? AND p.created_at<?${scope}
+ WHERE p.mode IN ('demo','toss_test') AND p.created_at>=? AND p.created_at<?${scope}
  UNION ALL SELECT o.id,o.store_id,o.total,o.cancelled_at AS stamp,-1 AS direction FROM orders o JOIN payment p ON p.order_id=o.id AND p.status='SUCCESS'
- WHERE p.mode='demo' AND o.cancelled_at>=? AND o.cancelled_at<?${scope})`;
+ WHERE p.mode IN ('demo','toss_test') AND o.cancelled_at>=? AND o.cancelled_at<?${scope})`;
  const metrics=`coalesce(sum(CASE WHEN direction=1 THEN total ELSE 0 END),0) AS approved,
  coalesce(sum(CASE WHEN direction=-1 THEN total ELSE 0 END),0) AS cancelled,
  coalesce(sum(total*direction),0) AS net,coalesce(sum(direction=1),0) AS orders,coalesce(sum(direction=-1),0) AS cancellations`;
@@ -35,5 +35,5 @@ export async function hqSales(db,actor,params){
  summary.quantity=menus.reduce((n,m)=>n+m.quantity,0);summary.returned_quantity=menus.reduce((n,m)=>n+m.returned_quantity,0);
  const byDate=new Map(result[1].results.map(d=>[d.date,d])),daily=[];
  for(let n=Date.parse(range.from+'T00:00:00Z');n<=Date.parse(range.to+'T00:00:00Z');n+=86400000){const date=new Date(n).toISOString().slice(0,10);daily.push(byDate.get(date)??{date,approved:0,cancelled:0,net:0,orders:0,cancellations:0});}
- return {from:range.from,to:range.to,mode:'demo',timezone:'Asia/Seoul',store:filter,summary,daily,stores:result[2].results,menus};
+ return {from:range.from,to:range.to,mode:'test',timezone:'Asia/Seoul',store:filter,summary,daily,stores:result[2].results,menus};
 }
