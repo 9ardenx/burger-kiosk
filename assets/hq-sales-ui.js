@@ -1,9 +1,9 @@
-import {escapeText as esc,money} from './common.js?v=20261128-v114';
-import {chart} from './insights-ui.js?v=20261128-v114';
+import {escapeText as esc,money} from './common.js?v=20261128-v115';
+import {chart} from './insights-ui.js?v=20261128-v115';
 const count=n=>Number(n).toLocaleString('ko-KR');
 export function hqSalesView(data,period,stores){
  const s=data.summary;
- return `<div class="heading split"><div><p class="eyebrow">본사</p><h1>통합 매출</h1><p>가맹점 실적과 전체 인기 메뉴를 한곳에서 확인합니다.</p></div><span class="mode-tag">모의 결제 기준</span></div>
+ return `<div class="heading split"><div><p class="eyebrow">본사</p><h1>통합 매출</h1><p>가맹점 실적과 전체 인기 메뉴를 한곳에서 확인합니다.</p></div><span class="mode-tag">테스트 결제 기준</span></div>
  <section class="panel report-controls"><div class="period-presets"><button class="secondary" data-hq-days="1">오늘</button><button class="secondary" data-hq-days="7">최근 7일</button><button class="secondary" data-hq-days="30">최근 30일</button></div>
  <form id="hq-sales-period"><label>조회 매장<select name="store"><option value="all">전체 가맹점</option>${stores.map(s=>`<option value="${s.id}" ${String(s.id)===period.store?'selected':''}>${esc(s.name)}${s.enabled?'':' (운영 중지)'}</option>`).join('')}</select></label><label>시작일<input name="from" type="date" value="${period.from}" required></label><label>종료일<input name="to" type="date" value="${period.to}" required></label><button class="primary">조회</button></form></section>
  <p class="report-caption">${esc(data.from)} ~ ${esc(data.to)} · 한국 시간 · 승인일 / 취소일 기준</p>

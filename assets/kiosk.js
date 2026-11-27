@@ -1,13 +1,13 @@
-import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261128-v114';
-import {evaluateGroups} from "./choice-rules.js?v=20261128-v114";
-import {labels, menuPicture, setCategories} from "./catalog.js?v=20261128-v114";
-import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261128-v114";
-import {welcomeView,heroView,diningName} from './welcome.js?v=20261128-v114';
-import {buildAdSlides} from './ad-slides.js?v=20261128-v114';
+import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261128-v115';
+import {evaluateGroups} from "./choice-rules.js?v=20261128-v115";
+import {labels, menuPicture, setCategories} from "./catalog.js?v=20261128-v115";
+import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261128-v115";
+import {welcomeView,heroView,diningName} from './welcome.js?v=20261128-v115';
+import {buildAdSlides} from './ad-slides.js?v=20261128-v115';
 
 const requestedStore=new URL(location.href).searchParams.get('store')??'1';
 const storageKey = 'burger-kiosk-session-v1'+(requestedStore==='1'?'':'.'+requestedStore);
-const defaults = () => ({cart: [], page: "welcome", diningType:null, checkoutKey: null, orderId: null, attemptKey: null, callback: null});
+const defaults = () => ({cart: [], page: "welcome", diningType:null, checkoutKey: null, orderId: null, paymentId:null, attemptKey: null, callback: null});
 let state;
 try { state = {...defaults(), ...JSON.parse(sessionStorage.getItem(storageKey))}; }
 catch { state = defaults(); }
@@ -56,7 +56,7 @@ function go(page) {
   window.scrollTo({top:0});
 }
 function invalidateOrder() {
-  Object.assign(state, {orderId:null, checkoutKey:null, attemptKey:null, callback:null});
+  Object.assign(state, {orderId:null, paymentId:null, checkoutKey:null, attemptKey:null, callback:null});
   order = null;
 }
 async function leaveCheckout() {
@@ -188,10 +188,11 @@ function checkoutView() {
   const amount = order ? order.total : total();
   return `<div class="narrow"><div class="heading"><h1>주문 확인 및 결제</h1><p>메뉴와 최종 금액을 확인해 주세요.</p></div>
     <section class="panel"><p class="dining-summary">이용 방식 · <strong>${diningName(order?order.dining_type:state.diningType)}</strong></p>${lines}<div class="line-heading pay-method"><span>결제 방식</span><b>${mode==="demo"?"모의 카드 결제":"토스페이먼츠 테스트"}</b></div>
-    ${demoSelect()}<div class="total"><span>최종 결제 금액</span><strong>${money(amount)}</strong></div>
-    <div class="actions">${button("cart","장바구니 수정",false)}${button("pay",money(amount)+" 결제하기")}</div>
+    ${paymentNote()}${demoSelect()}<div class="total"><span>최종 결제 금액</span><strong>${money(amount)}</strong></div>
+    <div class="actions">${button("cart","장바구니 수정",false)}${button("pay",money(amount)+" 결제하기",true,mode==="unavailable")}</div>
     <div class="checkout-exits">${button("menu","메뉴 선택으로 돌아가기",false)}<button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div></section></div>`;
 }
+function paymentNote(){return mode==="toss"?'<p class="info-note">토스 테스트 결제 · 실제 출금 없음</p>':mode==="unavailable"?'<p class="error-note">결제 설정을 확인하고 있습니다. 매장에 문의해 주세요.</p>':"";}
 function demoSelect() {
   return mode==="demo"?`<label class="select-row">모의 승인 결과<select id="demo-result"><option value="success">승인 성공</option><option value="failure">승인 거절</option></select></label>`:"";
 }
@@ -203,15 +204,15 @@ function resultView() {
     <div class="total"><span>모의 결제 취소 금액</span><strong>${money(order.total)}</strong></div>${button('reset','메뉴 다시 선택')}</section></div>`;
   if (state.page==="done") return `<div class="narrow"><div class="heading"><h1>주문이 접수되었습니다</h1></div><div class="panel receipt">
     <div class="pickup"><span>${diningName(order.dining_type)} · 주문번호</span><strong>${String(order.number).padStart(3,"0")}</strong></div><p>수령 시 주문번호를 확인해 주세요.</p>
-    ${itemsHtml(order.items)}<div class="total"><span>결제 금액</span><strong>${money(order.total)}</strong></div>${button("reset","처음으로")}</div></div>`;
+    ${paymentNote()}${itemsHtml(order.items)}<div class="total"><span>결제 금액</span><strong>${money(order.total)}</strong></div>${button("reset","처음으로")}</div></div>`;
   const failed = state.page==="failed";
   return `<div class="narrow"><div class="heading"><h1>${failed?"결제를 다시 시도해 주세요":"결제 결과 확인"}</h1></div><section class="panel">
     <p class="${failed?"error-note":"info-note"}">${failed?"승인이 거절되었거나 결제창이 닫혔습니다. 같은 주문으로 다시 결제할 수 있습니다.":
       order.payment?.has_key?"기존 거래의 승인 결과를 확인하고 있습니다.":"기존 주문의 테스트 결제 인증을 완료해 주세요."}</p>
     <p class="dining-summary">${diningName(order.dining_type)} 주문</p>${itemsHtml(order.items)}<div class="total"><span>결제할 금액</span><strong>${money(order.total)}</strong></div>
-    ${failed?demoSelect():""}<div class="actions">${failed?button("edit","장바구니 수정",false):""}
-    ${button(failed?"retry":"resume",failed?"다시 결제":order.payment?.has_key||state.callback?"결과 다시 확인":"결제창 열기")}</div>
-    ${failed?'<div class="checkout-exits"><button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div>':""}</section></div>`;
+    ${paymentNote()}${order.payment?.notice?`<p class="info-note">${escapeText(order.payment.notice)}</p>`:""}${failed?demoSelect():""}<div class="actions">${failed?button("edit","장바구니 수정",false):""}
+    ${button(failed?"retry":"resume",failed?"다시 결제":order.payment?.has_key||order.payment?.needs_reconcile||state.callback?"결과 다시 확인":"결제창 열기")}</div>
+    ${failed?'<div class="checkout-exits"><button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div>':button('cancel-payment','결제 중단',false)}</section></div>`;
 }
 function render() {
   adAnimation?.cancel();adAnimation=null;
@@ -230,7 +231,7 @@ function applyOrder(record) {
   state.diningType=record.dining_type??null;
   if(record.status==='CANCELLED'&&record.cancelled_by==='admin'){order=record;state.orderId=record.id;go('cancelled');return;}
   if(record.status==="CANCELLED"){invalidateOrder();go(count()?"cart":"menu");return;}
-  order=record; state.orderId=record.id;
+  order=record; state.orderId=record.id;state.paymentId=record.payment?.id??null;
   if(record.number!=null) go("done");
   else if(record.payment?.status==="FAILED") go("failed");
   else if(record.payment?.status==="PENDING") go("pending");
@@ -247,7 +248,7 @@ async function pay() {
     state.orderId=order.id;save();
   }
   if(!state.attemptKey) {state.attemptKey=crypto.randomUUID();save();}
-  const record=await api(`/api/orders/${order.id}/attempts`,{key:state.attemptKey,demo_result});
+  const record=await api(`/api/orders/${order.id}/attempts`,{key:state.attemptKey,demo_result,checkout_version:"v115"});
   applyOrder(record);
   if(record.payment?.status==="PENDING") await resume();
 }
@@ -263,10 +264,11 @@ async function openGateway() {
   }
   const attempt=order.payment.id;
   const payment=window.TossPayments(clientKey).payment({customerKey:window.TossPayments.ANONYMOUS});
-  const returnUrl=location.origin+"/return?attempt="+attempt;
+  const callback=new URL('./payment-return.html',location.href);callback.searchParams.set('store',requestedStore);callback.searchParams.set('attempt',attempt);callback.searchParams.set('v','20261128-v115');
+  const returnUrl=callback.href;
   try {
     await payment.requestPayment({method:"CARD",amount:{currency:"KRW",value:order.total},orderId:attempt,
-      orderName:order.items[0].name,successUrl:returnUrl,failUrl:returnUrl+"&failed=1"});
+      orderName:order.items[0].name.slice(0,100),successUrl:returnUrl,failUrl:returnUrl+"&failed=1"});
   } catch(error) {
     if(error.code==="USER_CANCEL" || error.code==="PAY_PROCESS_CANCELED") {
       applyOrder(await api("/api/payments/"+attempt,{cancel:true}));
@@ -278,7 +280,7 @@ async function resume() {
     const {attempt, data}=state.callback;
     const record=await api("/api/payments/"+attempt,data);
     state.callback=null;applyOrder(record);
-  } else if(order.payment.has_key) applyOrder(await api("/api/payments/"+order.payment.id,{}));
+  } else if(order.payment.has_key||order.payment.needs_reconcile) applyOrder(await api("/api/payments/"+order.payment.id,{}));
   else await openGateway();
 }
 async function recover(error) {
@@ -320,6 +322,7 @@ document.addEventListener("click",event=>{
     if(action==="retry"){state.attemptKey=null;save();return pay();}
     if(action==="pay") return pay();
     if(action==="resume") return resume();
+    if(action==="cancel-payment"){state.callback=null;applyOrder(await api("/api/payments/"+order.payment.id,{cancel:true}));return;}
     if(action==="reload") return boot();
     if(["minus","plus","remove"].includes(action)) {
       await leaveCheckout();

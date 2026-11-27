@@ -1,4 +1,4 @@
-import {pushState} from './assets/push-state.js?v=20261128-v114';
+import {pushState} from './assets/push-state.js?v=20261128-v115';
 self.addEventListener('install',()=>self.skipWaiting());
 self.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));
 let delivery=Promise.resolve();
@@ -22,7 +22,7 @@ self.addEventListener('notificationclick',event=>{
  event.notification.close();event.waitUntil((async()=>{
   const {store_id,event_id,generation}=event.notification.data??{},binding=await pushState('binding');
   if(!binding||binding.store_id!==store_id||binding.generation!==generation)return;
-  const url=new URL('admin.html',self.registration.scope);url.searchParams.set('store',String(store_id));url.searchParams.set('workspace','store');url.searchParams.set('notification',String(event_id));url.searchParams.set('v','20261128-v114');url.hash='orders';
+  const url=new URL('admin.html',self.registration.scope);url.searchParams.set('store',String(store_id));url.searchParams.set('workspace','store');url.searchParams.set('notification',String(event_id));url.searchParams.set('v','20261128-v115');url.hash='orders';
   const clients=await self.clients.matchAll({type:'window',includeUncontrolled:true});
   const existing=clients.find(c=>{const u=new URL(c.url);return u.origin===url.origin&&u.pathname===url.pathname&&u.searchParams.get('store')===String(store_id);});
   if(existing){await existing.navigate(url.href);await existing.focus();}else await self.clients.openWindow(url.href);
