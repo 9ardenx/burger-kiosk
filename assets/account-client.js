@@ -5,7 +5,7 @@ export function clearAccount(){sessionStorage.removeItem(key);}
 export function hasAccount(){return Boolean(sessionStorage.getItem(key));}
 export function rememberAccount(value){sessionStorage.setItem(key,JSON.stringify({idToken:value.idToken,refreshToken:value.refreshToken,expiresAt:Date.now()+Number(value.expiresIn)*1000}));}
 function authError(code){
- const message=code==='EMAIL_EXISTS'?'이미 가입된 이메일입니다. 로그인 또는 비밀번호 찾기를 이용해 주세요.':code==='TOO_MANY_ATTEMPTS_TRY_LATER'?'요청이 많습니다. 잠시 후 다시 시도해 주세요.':code?.startsWith('WEAK_PASSWORD')?'비밀번호는 12자 이상으로 설정해 주세요.':code==='INVALID_EMAIL'?'이메일 주소를 확인해 주세요.':'이메일과 비밀번호를 확인해 주세요.';
+ const message=code==='EMAIL_EXISTS'?'이미 가입된 이메일입니다. 로그인 또는 비밀번호 찾기를 이용해 주세요.':code==='TOO_MANY_ATTEMPTS_TRY_LATER'?'요청이 많습니다. 잠시 후 다시 시도해 주세요.':code?.startsWith('WEAK_PASSWORD')?'비밀번호는 6자 이상으로 설정해 주세요.':code==='INVALID_EMAIL'?'이메일 주소를 확인해 주세요.':'이메일과 비밀번호를 확인해 주세요.';
  return new Error(message);
 }
 async function provider(action,body){
@@ -17,7 +17,7 @@ async function provider(action,body){
 }
 export async function signInEmail(email,password){return provider('signInWithPassword',{email:email.trim(),password,returnSecureToken:true});}
 export async function registerEmail(email,password){
- if(password.length<12)throw new Error('비밀번호를 12자 이상으로 입력해 주세요.');
+ if(password.length<6)throw new Error('비밀번호를 6자 이상으로 입력해 주세요.');
  const user=await provider('signUp',{email:email.trim(),password,returnSecureToken:true});
  await provider('sendOobCode',{requestType:'VERIFY_EMAIL',idToken:user.idToken});return user;
 }
