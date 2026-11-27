@@ -1,8 +1,9 @@
-import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261127-v17';
-import {evaluateGroups} from "./choice-rules.js?v=20261127-v17";
-import {labels, menuPicture, setCategories} from "./catalog.js?v=20261127-v17";
-import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261127-v17";
-import {welcomeView,heroView,diningName} from './welcome.js?v=20261127-v17';
+import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261127-v17-ads';
+import {evaluateGroups} from "./choice-rules.js?v=20261127-v17-ads";
+import {labels, menuPicture, setCategories} from "./catalog.js?v=20261127-v17-ads";
+import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261127-v17-ads";
+import {welcomeView,heroView,diningName} from './welcome.js?v=20261127-v17-ads';
+import {buildAdSlides} from './ad-slides.js?v=20261127-v17-ads';
 
 const storageKey = "burger-kiosk-session-v1";
 const defaults = () => ({cart: [], page: "welcome", diningType:null, checkoutKey: null, orderId: null, attemptKey: null, callback: null});
@@ -10,10 +11,29 @@ let state;
 try { state = {...defaults(), ...JSON.parse(sessionStorage.getItem(storageKey))}; }
 catch { state = defaults(); }
 let menu = [], mode = "demo", clientKey = "", order = null, busy = false;
-let ads=[],adIndex=0,adPaused=matchMedia('(prefers-reduced-motion: reduce)').matches;
+const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
+let ads=[],adCatalog=[],adIndex=0,adPaused=reducedMotion.matches,adElapsed=0,adLastTick=performance.now(),adAnimation=null;
+const AD_INTERVAL=60000;
+function resetAdClock(){adElapsed=0;adLastTick=performance.now();}
 const validDining=()=>['DINE_IN','TAKEOUT'].includes(state.diningType);
-async function loadAds(){try{ads=(await api('/api/ads')).items;adIndex=Math.min(adIndex,Math.max(0,ads.length-1));}catch{/* Ordering remains available without advertising. */}}
-function paintAd(){const host=document.querySelector('#welcome-ad');if(!host)return;host.innerHTML=heroView(ads[adIndex],menu);const counter=document.querySelector('#ad-position');if(counter)counter.textContent=(adIndex+1)+' / '+ads.length;}
+function updateAdSlides(preserve=true){
+ const id=preserve?ads[adIndex]?.id:null;ads=buildAdSlides(adCatalog,menu);
+ const index=ads.findIndex(a=>a.id===id);adIndex=Math.max(0,index);if(index<0)resetAdClock();
+}
+async function loadAds(){try{adCatalog=(await api('/api/ads')).items;updateAdSlides(false);}catch{/* Ordering remains available without advertising. */}}
+function paintAd(direction=0){
+ const host=document.querySelector('#welcome-ad');if(!host)return;
+ adAnimation?.cancel();adAnimation=null;
+ const previous=host.querySelector('.ad-slide:not([aria-hidden="true"])')?.innerHTML,next=heroView(ads[adIndex],menu);
+ if(direction&&previous&&!reducedMotion.matches){
+  const old=`<div class="ad-slide" aria-hidden="true">${previous}</div>`,current=`<div class="ad-slide">${next}</div>`;
+  host.innerHTML=`<div class="ad-track">${direction>0?old+current:current+old}</div>`;
+  const track=host.firstElementChild,animation=track.animate([{transform:direction>0?'translateX(0)':'translateX(-100%)'},{transform:direction>0?'translateX(-100%)':'translateX(0)'}],{duration:380,easing:'ease-in-out',fill:'forwards'});adAnimation=animation;
+  animation.finished.then(()=>{if(adAnimation!==animation||!host.isConnected)return;host.innerHTML=`<div class="ad-slide">${next}</div>`;adAnimation=null;}).catch(()=>{});
+ }else host.innerHTML=`<div class="ad-slide">${next}</div>`;
+ const counter=document.querySelector('#ad-position');if(counter)counter.textContent=(adIndex+1)+' / '+ads.length;
+}
+function moveAd(direction){if(ads.length<2)return;adIndex=(adIndex+direction+ads.length)%ads.length;paintAd(direction);resetAdClock();}
 const dialog = document.querySelector("#options");
 const save = () => sessionStorage.setItem(storageKey, JSON.stringify(state));
 const count = () => state.cart.reduce((sum, line) => sum + line.quantity, 0);
@@ -28,6 +48,7 @@ const button = (action, text, primary = true, disabled = false) =>
 
 function go(page) {
   if(['menu','cart','review'].includes(page)&&!validDining()&&!state.orderId)page='welcome';
+  if(page==='welcome'){adIndex=0;resetAdClock();}
   state.page = page;
   save();
   render();
@@ -51,6 +72,7 @@ async function loadMenu() {
   const catalog = await api("/api/menu");
   setPriceClock(catalog.server_time);
   menu = catalog.menu; mode = catalog.mode; clientKey = catalog.clientKey;
+  updateAdSlides();
   setCategories(catalog.categories);if(categoryFilter!=='all'&&!Object.hasOwn(labels,categoryFilter))categoryFilter='all';
 }
 function syncPrices() {
@@ -190,6 +212,7 @@ function resultView() {
     ${failed?'<div class="checkout-exits"><button class="text-btn" data-action="cancel-order">주문 전체 취소</button></div>':""}</section></div>`;
 }
 function render() {
+  adAnimation?.cancel();adAnimation=null;
   document.querySelector('#steps').hidden=state.page==='welcome';
   const stage={menu:0,cart:1,review:2,failed:2,pending:2,done:3,cancelled:3}[state.page] ?? 0;
   document.querySelector("#steps").innerHTML = ["메뉴 선택","장바구니","결제","주문 완료"].map((label,i)=>
@@ -277,7 +300,7 @@ document.addEventListener("click",event=>{
   const control=event.target.closest("[data-action]");
   if(!control || control.disabled)return;
   const action=control.dataset.action;
-  if(action.startsWith('ad-')){if(busy||!ads.length)return;if(action==='ad-pause'){adPaused=!adPaused;control.textContent=adPaused?'자동 재생':'일시 정지';control.setAttribute('aria-pressed',String(adPaused));}else{adIndex=(adIndex+(action==='ad-next'?1:ads.length-1))%ads.length;paintAd();}return;}
+  if(action.startsWith('ad-')){if(busy||!ads.length)return;if(action==='ad-pause'){adPaused=!adPaused;resetAdClock();control.textContent=adPaused?'자동 재생':'일시 정지';control.setAttribute('aria-pressed',String(adPaused));}else moveAd(action==='ad-next'?1:-1);return;}
   if(action==="close") {dialog.close();return;}
   if(["clear-cart","cancel-order"].includes(action)){
     if(busy||!confirm(action==="clear-cart"?"장바구니의 메뉴를 모두 비울까요?":"현재 주문을 모두 취소하고 처음부터 시작할까요?"))return;
@@ -338,7 +361,15 @@ async function refreshShelf() {
     catch{}finally{checkingShelf=false;}return;
   }
   if(state.page==='welcome'){
-    checkingShelf=true;try{const data=await api('/api/ads');if(state.page==='welcome'&&!busy&&JSON.stringify(ads)!==JSON.stringify(data.items)){ads=data.items;adIndex=Math.min(adIndex,Math.max(0,ads.length-1));render();}}catch{}finally{checkingShelf=false;}return;
+    checkingShelf=true;try{
+      const [adResult,menuResult]=await Promise.allSettled([api('/api/ads'),api('/api/menu')]);
+      if(state.page==='welcome'&&!busy){
+        const before=JSON.stringify(ads);
+        if(adResult.status==='fulfilled')adCatalog=adResult.value.items;
+        if(menuResult.status==='fulfilled'){menu=menuResult.value.menu;setPriceClock(menuResult.value.server_time);setCategories(menuResult.value.categories);}
+        updateAdSlides();if(before!==JSON.stringify(ads))render();
+      }
+    }catch{}finally{checkingShelf=false;}return;
   }
   if(!['menu','cart'].includes(state.page))return;
   checkingShelf=true;
@@ -358,4 +389,11 @@ async function refreshShelf() {
 document.addEventListener("visibilitychange",refreshShelf);
 setInterval(refreshShelf,15000);
 setInterval(tickDiscounts,1000);
-setInterval(()=>{if(state.page==='welcome'&&!document.hidden&&!busy&&!adPaused&&ads.length>1&&!document.querySelector('.ad-navigation')?.contains(document.activeElement)){adIndex=(adIndex+1)%ads.length;paintAd();}},8000);
+setInterval(()=>{
+ const now=performance.now(),elapsed=now-adLastTick;adLastTick=now;
+ if(state.page!=='welcome'||document.hidden||busy||adPaused||ads.length<2)return;
+ adElapsed+=elapsed;
+ if(adElapsed>=AD_INTERVAL)moveAd(1);
+},250);
+document.addEventListener('visibilitychange',resetAdClock);
+reducedMotion.addEventListener('change',event=>{if(event.matches){adPaused=true;resetAdClock();const b=document.querySelector('[data-action=ad-pause]');if(b){b.textContent='자동 재생';b.setAttribute('aria-pressed','true');}if(adAnimation)paintAd();}});

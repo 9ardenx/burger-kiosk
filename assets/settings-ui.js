@@ -1,4 +1,4 @@
-import {escapeText} from './common.js?v=20261127-v17';
+import {escapeText} from './common.js?v=20261127-v17-ads';
 export function categoriesView(items,menu,dirty){
   return `<div class="heading"><h1>분류 관리</h1><p>메뉴 분류의 이름과 표시 순서를 관리합니다.</p></div>
   <form id="category-settings" class="panel"><p class="muted">메뉴가 남아 있는 분류는 삭제할 수 없습니다. 메뉴 수정에서 다른 분류로 옮긴 뒤 삭제해 주세요.</p>
