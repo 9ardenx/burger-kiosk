@@ -1,22 +1,25 @@
-import {handleVariantButton} from "./group-editor.js";
-import {editorHtml,editorData,optionRow} from "./menu-editor.js";
-import {jpegForUpload,photoPosition} from "./menu-photo.js";
-import {categoryName,menuPicture,setCategories} from "./catalog.js";
-import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js';
-import {adList,adEditor} from './advertising-ui.js';
-import {diningName} from './welcome.js';
-import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261126-inventory-2';
-import {api, app, escapeText, money, itemsHtml, notice} from "./common.js";
+import {promotionView,promotionData,promotionPreview} from './promotions-ui.js?v=20261127-v17';
+import {handleVariantButton} from "./group-editor.js?v=20261127-v17";
+import {editorHtml,editorData,optionRow} from "./menu-editor.js?v=20261127-v17";
+import {jpegForUpload,photoPosition} from "./menu-photo.js?v=20261127-v17";
+import {categoryName,menuPicture,setCategories} from "./catalog.js?v=20261127-v17";
+import {categoriesView,securityView,recoveryResult,resetView} from './settings-ui.js?v=20261127-v17';
+import {adList,adEditor} from './advertising-ui.js?v=20261127-v17';
+import {diningName} from './welcome.js?v=20261127-v17';
+import {salesView,inventoryView,periodPreset} from './insights-ui.js?v=20261127-v17';
+import {api, app, escapeText, money, itemsHtml, notice} from "./common.js?v=20261127-v17";
 
 const tabs=document.querySelector("#tabs");
 const states={PAID:"결제완료",PREPARING:"조리중",READY:"준비완료",COMPLETED:"수령완료",CANCELLED:"직권취소"};
 const cancelDialog=document.querySelector('#admin-cancel-dialog');
 const nextLabels={PAID:"조리 시작",PREPARING:"준비 완료",READY:"수령 완료"};
-let current=location.hash==='#inventory'?'inventory':'orders', orders=[], menu=[], busy=false, selected=null, filter="open", timer;
+let current=['inventory','promotions'].includes(location.hash.slice(1))?location.hash.slice(1):'orders', orders=[], menu=[], busy=false, selected=null, filter="open", timer;
 let editor=null, previewUrl=null, previewSequence=0;
 let categoryDraft=[],categorySaved=[],categoryRevision=0,security=null;
 let advertising={items:[],revision:0},adEdit=null,adSequence=0,adDirty=false;
 let sales=null,salesPeriod=periodPreset(),inventory={items:[],history:[]},inventoryEdit=null,inventoryFilter='all';
+let promotions={items:[],revision:0,active:[]},promotionEdit=null;
+async function savePromotionCatalog(items){promotions=await api('/api/admin/promotions',{items,revision:promotions.revision});promotionEdit=null;render();}
 const adPhotoOptions=form=>({width:1440,height:810,x:Number(form.elements['ad-x'].value)/100,y:Number(form.elements['ad-y'].value)/100});
 async function refreshAdPreview(form){
   const sequence=++adSequence,file=form.elements['ad-photo'].files[0];if(!file)return;
@@ -46,7 +49,7 @@ async function refreshPhotoPreview(form) {
     state.textContent=error.message;notice(error.message);
   }
 }
-function closeEditor(){resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;inventoryEdit=null;}
+function closeEditor(){promotionEdit=null;resetPreview();editor=null;adEdit=null;adDirty=false;adSequence++;inventoryEdit=null;}
 function login(recovery=false) {
   cancelDialog.close();
   sessionEpoch++;orderEpoch++;pendingOrders.clear();
@@ -113,12 +116,14 @@ function patchOrders() {
 }
 function render() {
   tabs.hidden=false;
-  tabs.innerHTML=Object.entries({orders:'주문 현황',sales:'매출 분석',inventory:'재고 관리',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',security:'암호 관리'}).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
-  app.innerHTML=current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
+  tabs.innerHTML=Object.entries({orders:'주문 현황',sales:'매출 분석',inventory:'재고 관리',menu:'메뉴 관리',categories:'분류 관리',ads:'광고 관리',promotions:'할인 관리',security:'암호 관리'}).map(([id,name])=>`<button data-tab="${id}" aria-pressed="${current===id}">${name}</button>`).join('')+'<button class="logout" data-act="logout">로그아웃</button>';
+  app.innerHTML=current==='promotions'?promotionView(promotions,menu,promotionEdit):current==='sales'?salesView(sales,salesPeriod):current==='inventory'?inventoryView(inventory,inventoryEdit,inventoryFilter):current==='ads'?(adEdit?adEditor(adEdit.item):adList(advertising.items)):current==='categories'?categoriesView(categoryDraft,menu,categoriesDirty()):current==='security'?securityView(security):current==="menu"?menuView():ordersView();
   if(current==="orders")patchOrders();
+  if(current==='promotions'&&promotionEdit)promotionPreview(app.querySelector('#promotion-editor'),menu);
   setRequestState(busy);
 }
 async function refresh() {
+  if(current==='promotions'){const [p,m]=await Promise.all([api('/api/admin/promotions'),api('/api/admin/menu')]);promotions=p;menu=m.menu;render();return;}
   if(current==='sales'){sales=await api('/api/admin/sales?'+new URLSearchParams(salesPeriod));render();return;}
   if(current==='inventory'){inventory=await api('/api/admin/inventory');render();return;}
   if(current==='ads'){advertising=await api('/api/admin/ads');render();return;}
@@ -209,6 +214,7 @@ document.addEventListener("submit",event=>{
   }
   act(async()=>{
     const data=new FormData(form);
+    if(form.id==='promotion-editor'){const p=promotionData(form,promotionEdit.id),items=promotions.items.map(x=>x.id===p.id?p:x);if(promotionEdit.isNew)items.push(p);await savePromotionCatalog(items);notice('할인 예약을 저장했습니다. 설정한 시간에 자동으로 적용됩니다.');return;}
     if(form.id==='sales-period'){
       salesPeriod={from:data.get('from'),to:data.get('to')};await refresh();return;
     }
@@ -254,6 +260,10 @@ document.addEventListener("click",event=>{
   const b=event.target.closest("button");
   if(!b || b.disabled || b.type==="submit" && b.closest("form"))return;
 if(busy)return;
+  if(b.hasAttribute('data-new-promotion')||b.dataset.editPromotion){promotionEdit=b.dataset.editPromotion?structuredClone(promotions.items.find(p=>p.id===b.dataset.editPromotion)):{id:crypto.randomUUID(),isNew:true,title:'',enabled:true,mode:'PERCENT',value:10,weekdays:[0,1,2,3,4,5,6],menu_ids:[],start_time:'11:00',end_time:'14:00',start_date:null,end_date:null};render();return;}
+  if(b.hasAttribute('data-back-promotions')){if(confirm('저장하지 않은 할인 입력을 버리고 돌아갈까요?')){promotionEdit=null;render();}return;}
+  if(b.dataset.deletePromotion){if(confirm('이 할인 예약을 삭제할까요?'))act(()=>savePromotionCatalog(promotions.items.filter(p=>p.id!==b.dataset.deletePromotion)));return;}
+  if(b.dataset.togglePromotion){act(()=>savePromotionCatalog(promotions.items.map(p=>p.id===b.dataset.togglePromotion?{...p,enabled:!p.enabled}:p)));return;}
   if(b.dataset.salesDays){act(async()=>{salesPeriod=periodPreset(Number(b.dataset.salesDays));await refresh();});return;}
   if(b.dataset.inventoryEdit){inventoryEdit=structuredClone(inventory.items.find(i=>i.id===Number(b.dataset.inventoryEdit)));render();app.querySelector('[name="quantity"]').focus();return;}
   if(b.hasAttribute('data-inventory-back')){inventoryEdit=null;render();return;}
@@ -325,6 +335,7 @@ if(busy)return;
   if(current==="menu"&&!editor&&orderDirty()&&(b.dataset.tab||b.dataset.act==="logout")&&!confirm("저장하지 않은 메뉴 순서를 되돌리고 이동할까요?"))return;
   if(current==='categories'&&categoriesDirty()&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 분류 변경을 되돌리고 이동할까요?'))return;
   if(current==='ads'&&adDirty&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 광고 변경을 버리고 이동할까요?'))return;
+  if(current==='promotions'&&promotionEdit&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 할인 입력을 버리고 이동할까요?'))return;
   if(current==='inventory'&&inventoryEdit&&(b.dataset.tab||b.dataset.act==='logout')&&!confirm('저장하지 않은 재고 입력을 버리고 이동할까요?'))return;
   act(async()=>{
     if(b.dataset.tab){closeEditor();current=b.dataset.tab;await refresh();}
@@ -361,3 +372,5 @@ document.addEventListener('input',event=>{
   if(!['photo-x','photo-y'].includes(event.target.name))return;
   const form=event.target.closest('#menu-editor');if(form&&editor)void refreshPhotoPreview(form);
 });
+
+document.addEventListener('input',event=>{const form=event.target.closest('#promotion-editor');if(form)promotionPreview(form,menu);});

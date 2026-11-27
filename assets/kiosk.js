@@ -1,7 +1,8 @@
-import {evaluateGroups} from "./choice-rules.js";
-import {labels, menuPicture, setCategories} from "./catalog.js";
-import {api, app, money, escapeText, itemsHtml, notice} from "./common.js";
-import {welcomeView,heroView,diningName} from './welcome.js';
+import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261127-v17';
+import {evaluateGroups} from "./choice-rules.js?v=20261127-v17";
+import {labels, menuPicture, setCategories} from "./catalog.js?v=20261127-v17";
+import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261127-v17";
+import {welcomeView,heroView,diningName} from './welcome.js?v=20261127-v17';
 
 const storageKey = "burger-kiosk-session-v1";
 const defaults = () => ({cart: [], page: "welcome", diningType:null, checkoutKey: null, orderId: null, attemptKey: null, callback: null});
@@ -48,6 +49,7 @@ async function leaveCheckout() {
 }
 async function loadMenu() {
   const catalog = await api("/api/menu");
+  setPriceClock(catalog.server_time);
   menu = catalog.menu; mode = catalog.mode; clientKey = catalog.clientKey;
   setCategories(catalog.categories);if(categoryFilter!=='all'&&!Object.hasOwn(labels,categoryFilter))categoryFilter='all';
 }
@@ -61,6 +63,7 @@ function syncPrices() {
     line.needsChoice=selection.invalid || selection.missing.length>0;
     line.selections=selection.ids;
     line.label=[...selection.snapshot.map(s=>s.name),...options.map(o=>o.name)].join(", ");
+    line.promotion=item.promotion;
     line.version = item.version;
     line.name = item.name;
     line.unit = item.base_price + selection.amount + options.reduce((sum,o) => sum+o.extra_price,0);
@@ -70,7 +73,7 @@ function cartLines(edit = false) {
   if (!count()) return `<div class="empty-cart"><span class="bag-icon" aria-hidden="true"></span><p>장바구니가 비어 있어요.</p><small>주문할 메뉴를 선택해 주세요.</small></div>`;
   return state.cart.map((line,i) => `<div class="cart-row"><div class="line-heading"><b>${escapeText(line.name)}</b>
     ${edit?`<button class="text-btn" data-action="remove" data-i="${i}">삭제</button>`:`<span>× ${line.quantity}</span>`}</div>
-    <small>${escapeText(line.label || "기본 구성")}${currentMenu(line.id)?"":" · 품절"}</small>
+    <small>${escapeText(line.label || "기본 구성")}${currentMenu(line.id)?"":" · 품절"}</small>${line.promotion?`<small class="cart-discount">${escapeText(line.promotion.title)} 적용 · 결제 시 가격 재확인</small>`:""}
     ${edit && currentMenu(line.id) && (currentMenu(line.id).choice_groups?.length || line.needsChoice)?`<button class="text-btn" data-action="configure" data-i="${i}">${line.needsChoice?"필수 옵션 다시 선택":"옵션 변경"}</button>`:""}
     <div class="line-heading">${edit?quantityControl(line,i):"<span></span>"}<strong>${money(line.unit*line.quantity)}</strong></div></div>`).join("");
 }
@@ -83,7 +86,7 @@ function menuView() {
   const visible=menu.filter(item=>categoryFilter==="all" || (item.category??"burger")===categoryFilter);
   const cards = visible.map(item => `<button class="menu-card ${item.kind==="chicken"?"sage":"oat"} ${item.is_sold_out?"sold-out":""}" data-action="choose" data-id="${item.id}" ${item.is_sold_out?'disabled aria-disabled="true"':""}>
     <span class="art ${item.photo_key?"with-photo":""}"><img src="${menuPicture(item)}" alt="">${item.is_sold_out?'<span class="stock-badge">품절</span>':""}</span><span class="card-copy"><strong>${escapeText(item.name)}</strong>
-    <small>${escapeText(item.description)}</small><span class="card-bottom"><b>${money(item.base_price)}</b>${item.is_sold_out?'<span class="sold-copy">선택 불가</span>':'<span class="add-mark" aria-hidden="true">＋</span>'}</span></span></button>`).join("");
+    <small>${escapeText(item.description)}</small>${promotionNote(item)}<span class="card-bottom">${priceHtml(item)}${item.is_sold_out?'<span class="sold-copy">선택 불가</span>':'<span class="add-mark" aria-hidden="true">＋</span>'}</span></span></button>`).join("");
   return `<div class="heading"><h1>메뉴 선택</h1><p>주문할 메뉴를 골라 주세요.</p></div>
     <nav class="filters menu-filters" aria-label="메뉴 분류">${Object.entries({all:"전체",...labels}).map(([id,title])=>
       `<button data-category="${escapeText(id)}" aria-pressed="${id===categoryFilter}">${escapeText(title)}</button>`).join("")}</nav><div class="shop-layout"><section class="menu-grid" aria-label="메뉴 목록">
@@ -110,7 +113,7 @@ function optionView(id, editIndex=null) {
   dialog.innerHTML=`<form id="option-form"><button type="button" class="close" data-action="close" aria-label="닫기">×</button>
     <div class="dialog-art ${item.photo_key?"with-photo":""} ${item.kind==="chicken"?"sage":"oat"}"><img src="${menuPicture(item)}" alt=""></div>
     <div class="dialog-body"><h2 id="option-title">${escapeText(item.name)}</h2><p class="muted">${escapeText(item.description)}</p>
-    <div class="line-heading"><span>기본 가격</span><b>${money(item.base_price)}</b></div>
+    <div class="line-heading"><span>기본 가격</span>${priceHtml(item)}</div>${promotionNote(item)}
     ${item.options.length?`<fieldset><legend>추가 옵션</legend>${item.options.map(o=>`<label class="option"><span><input type="checkbox" value="${o.id}" ${editing?.options.includes(o.id)?"checked":""}> ${escapeText(o.name)}</span><b>+${money(o.extra_price)}</b></label>`).join("")}</fieldset>`:""}
     <div id="choice-fields"></div><p class="choice-message" aria-live="polite"></p><button type="submit" class="primary wide"><span id="option-price"></span> · ${editing?"선택 변경":"장바구니에 담기"}</button></div></form>`;
   const form=dialog.querySelector("form"), fields=form.querySelector("#choice-fields");
@@ -148,7 +151,7 @@ function optionView(id, editIndex=null) {
     const other=cart.find(l=>l.id===id && l.options.join()===options.join() && (l.selections??[]).join()===selections.join());
     const quantity=(editing?.quantity??1)+(other?.quantity??0);
     if(quantity>99){dialog.close();notice("한 항목은 최대 99개까지 담을 수 있습니다.");return;}
-    const line={id,name:item.name,options,selections,label,quantity,unit:result.unit,version:item.version};
+    const line={id,name:item.name,options,selections,label,quantity,unit:result.unit,version:item.version,promotion:item.promotion};
     if(other)Object.assign(other,line,{needsChoice:false});
     else cart.splice(editing?Math.min(editIndex,cart.length):cart.length,0,line);
     state.cart=cart;invalidateOrder();dialog.close();go("cart");
@@ -343,6 +346,7 @@ async function refreshShelf() {
     const catalog=await api("/api/menu");
     // A popup may open while this request is pending. Apply labels and menus together.
     if(busy || dialog.open || !['menu','cart'].includes(state.page))return;
+    setPriceClock(catalog.server_time);
     const oldLabels=JSON.stringify(labels);setCategories(catalog.categories);
     if(categoryFilter!=='all'&&!Object.hasOwn(labels,categoryFilter))categoryFilter='all';
     if(JSON.stringify(menu)!==JSON.stringify(catalog.menu)||oldLabels!==JSON.stringify(labels)){
@@ -353,4 +357,5 @@ async function refreshShelf() {
 }
 document.addEventListener("visibilitychange",refreshShelf);
 setInterval(refreshShelf,15000);
+setInterval(tickDiscounts,1000);
 setInterval(()=>{if(state.page==='welcome'&&!document.hidden&&!busy&&!adPaused&&ads.length>1&&!document.querySelector('.ad-navigation')?.contains(document.activeElement)){adIndex=(adIndex+1)%ads.length;paintAd();}},8000);

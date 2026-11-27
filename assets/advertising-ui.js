@@ -1,5 +1,5 @@
-import {escapeText} from './common.js';
-import {adPhotoUrl} from './backend.js';
+import {escapeText} from './common.js?v=20261127-v17';
+import {adPhotoUrl} from './backend.js?v=20261127-v17';
 export function adList(items){
   return `<div class="heading split"><div><h1>광고 관리</h1><p>키오스크 첫 화면에 보여 줄 소식을 관리합니다.</p></div><button class="primary" data-new-ad ${items.length>=10?'disabled':''}>+ 광고 등록</button></div>
   <p class="info-note ad-help">최대 10개 · 노출 중인 광고는 등록한 순서대로 표시됩니다. 광고가 없으면 기본 안내 화면을 보여 줍니다.</p>

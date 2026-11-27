@@ -4,7 +4,7 @@ export const escapeText = value => String(value).replace(/[&<>"']/g, char => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
 })[char]);
 
-export { api } from "./backend.js";
+export { api } from "./backend.js?v=20261127-v17";
 
 export function notice(message = "") {
   const element = document.querySelector("#notice");
@@ -17,7 +17,7 @@ export function itemsHtml(items) {
     const options = item.options.map(option => option.name).join(", ");
     const unit = item.price + item.options.reduce((sum, option) => sum + option.option_price, 0);
     return '<div class="receipt-line"><div><b>' + escapeText(item.name) + ' × ' + item.quantity +
-      '</b><small>' + escapeText(options || "기본 구성") + '</small></div><strong>' +
+      '</b><small>' + escapeText((options || "기본 구성")+(item.promotion?" · "+item.promotion.title+" 적용":"")) + '</small></div><strong>' +
       money(unit * item.quantity) + '</strong></div>';
   }).join("");
 }
