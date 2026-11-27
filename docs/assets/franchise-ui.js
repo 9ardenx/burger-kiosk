@@ -1,5 +1,5 @@
-import {escapeText as esc} from './common.js?v=20261128-v113';
-import {addressFields} from './store-profile-ui.js?v=20261128-v113';
+import {escapeText as esc} from './common.js?v=20261128-v114';
+import {addressFields} from './store-profile-ui.js?v=20261128-v114';
 export function franchiseView(data){
  const stores=data.stores,templates=stores.filter(s=>s.menu_count>0);
  return `<section class="franchise-dashboard"><div class="heading"><h1>가맹점 관리</h1><p class="muted">같은 기본 구성으로 가맹점을 개설하고, 매장별 운영을 관리합니다.</p></div>

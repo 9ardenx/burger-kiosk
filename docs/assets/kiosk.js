@@ -1,9 +1,9 @@
-import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261128-v113';
-import {evaluateGroups} from "./choice-rules.js?v=20261128-v113";
-import {labels, menuPicture, setCategories} from "./catalog.js?v=20261128-v113";
-import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261128-v113";
-import {welcomeView,heroView,diningName} from './welcome.js?v=20261128-v113';
-import {buildAdSlides} from './ad-slides.js?v=20261128-v113';
+import {priceHtml,promotionNote,setPriceClock,tickDiscounts} from './promotion-price.js?v=20261128-v114';
+import {evaluateGroups} from "./choice-rules.js?v=20261128-v114";
+import {labels, menuPicture, setCategories} from "./catalog.js?v=20261128-v114";
+import {api, app, money, escapeText, itemsHtml, notice} from "./common.js?v=20261128-v114";
+import {welcomeView,heroView,diningName} from './welcome.js?v=20261128-v114';
+import {buildAdSlides} from './ad-slides.js?v=20261128-v114';
 
 const requestedStore=new URL(location.href).searchParams.get('store')??'1';
 const storageKey = 'burger-kiosk-session-v1'+(requestedStore==='1'?'':'.'+requestedStore);

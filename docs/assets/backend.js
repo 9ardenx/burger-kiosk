@@ -1,4 +1,4 @@
-import {accountToken,clearAccount} from './account-client.js?v=20261128-v113';
+import {accountToken,clearAccount} from './account-client.js?v=20261128-v114';
 const API_ORIGIN = "https://burger-kiosk-9ardenx-api.epicowl12.chatgpt.site";
 const keyPrefix = "burger-kiosk.cloud.v1.";
 export function getStoreId(){const value=new URL(location.href).searchParams.get('store')??'1';return /^[1-9]\d{0,8}$/.test(value)?Number(value):1;}
@@ -15,8 +15,8 @@ function customerKey() {
   return key;
 }
 export function beginLogout(){const legacy=sessionStorage.getItem(keyPrefix+'staff');const account=clearAccount();sessionStorage.removeItem(keyPrefix+'staff');return account??legacy??'';}
-async function api(path,body,tokenSnapshot) {
-  const headers={"X-Kiosk-Session":customerKey(),"X-Kiosk-Store":String(getStoreId())};
+async function api(path,body,tokenSnapshot,storeOverride) {
+  const headers={"X-Kiosk-Session":customerKey(),"X-Kiosk-Store":String(storeOverride??getStoreId())};
   const token=sessionStorage.getItem(keyPrefix+"staff");
   const protectedPath=path.startsWith('/api/admin/')||path.startsWith('/api/account');
   const account=tokenSnapshot!==undefined?tokenSnapshot:protectedPath&&!['/api/admin/login','/api/admin/claim-account'].includes(path)?await accountToken():null;
